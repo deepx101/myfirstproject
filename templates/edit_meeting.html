@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit Meeting</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <!-- Sidebar Toggle -->
+    <button class="sidebar-toggle" id="sidebarToggle">
+        <span></span>
+        <span></span>
+        <span></span>
+    </button>
+
+    <header class="top-nav">
+        <h2>Edit Meeting</h2>
+        <a href="{{ url_for('my_created_meetings') }}" class="back-btn">← My Meetings</a>
+        <a href="{{ url_for('logout') }}" class="logout-btn">Logout</a>
+    </header>
+
+    <div class="container">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <ul>
+                <li><a href="{{ url_for('create_schedule') }}">➕ Create Schedule</a></li>
+                <li><a href="{{ url_for('my_created_meetings') }}" class="active">✏️ My Meetings</a></li>
+                <li><a href="{{ url_for('my_schedule') }}">📋 My Schedule</a></li>
+                <li><a href="{{ url_for('department_calendar') }}">📅 Department Calendar</a></li>
+                <li><a href="{{ url_for('profile') }}">👤 Profile</a></li>
+            </ul>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+            <h3>Edit Meeting Details</h3>
+<!-- 
+            {% if error %}
+            <div class="error-message" style="white-space: pre-wrap;">{{ error }}</div>
+            {% endif %}
+
+            {% if success %}
+            <div class="success-message">{{ success }}</div>
+            {% endif %} -->
+            {% with messages = get_flashed_messages() %}
+    {% if messages %}
+        {% for message in messages %}
+            <div class="error-message" style="white-space: pre-wrap;">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+{% endwith %}
+            <form method="POST" class="form-container">
+                <!-- ✅ SAME FIELDS as create_schedule -->
+                <div class="form-group">
+                    <label>Meeting Title *</label>
+                    <input type="text" name="meeting_title" 
+                           value="{{ meeting.meeting_title }}" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Date *</label>
+                    <input type="date" name="meeting_date" 
+                           value="{{ meeting.meeting_date.strftime('%Y-%m-%d') }}" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Start Time *</label>
+                    <input type="time" name="start_time" 
+                           value="{{ meeting.start_time }}" required>
+                </div>
+
+                <div class="form-group">
+                    <label>End Time *</label>
+                    <input type="time" name="end_time" 
+                           value="{{ meeting.end_time }}" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Venue *</label>
+                    <input type="text" name="venue" 
+                           value="{{ meeting.venue }}" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Department *</label>
+                    <select name="department_id" required>
+                        <option value="">-- Select Department --</option>
+                        {% for dept in departments %}
+                        <option value="{{ dept.department_id }}" 
+                                {% if dept.department_id == meeting.department_id %}selected{% endif %}>
+                            {{ dept.department_name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- ✅ SAME PARTICIPANT SEARCH as create_schedule -->
+                <div class="form-group">
+                    <label>Select Participants</label>
+                    <input type="text" id="searchMember" placeholder="🔍 Search member by name, email, userid, or department">
+                    <div class="participant-box" id="memberList">
+                        {% for member in all_users %}
+                        {% set is_selected = member.user_id|string in participants|map(attribute='user_id')|map('string')|list %}
+                        <div class="participant-item">
+                            <label>
+                                <input type="checkbox" name="participants" value="{{ member.user_id }}" 
+                                       {% if is_selected %}checked{% endif %}>
+                                <h3>{{ member.user_name }}</h3>
+                                User ID: {{ member.user_id }}<br>
+                                <div class="department">Dept: {{ member.department_name or 'N/A' }}</div>
+                                <div class="mobile">Mobile No: {{ member.user_mobileNo or 'N/A' }}</div>
+                                <div class="email">Email: {{ member.email }}</div>
+                            </label>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <!-- ✅ Update Button (same style) -->
+                <button type="submit" class="submit-btn">✅ Update Meeting</button>
+                <a href="{{ url_for('my_created_meetings') }}" class="reject-btn" style="margin-left: 10px;">❌ Cancel</a>
+            </form>
+        </main>
+    </div>
+
+    <!-- ✅ SAME JAVASCRIPT as create_schedule -->
+    <script>
+        // Sidebar toggle
+        
+        const sidebarToggle = document.getElementById('sidebarToggle');
+        const sidebar = document.getElementById('sidebar');
+    
+        // Load saved state
+        if (localStorage.getItem('sidebarCollapsed') === 'true') {
+            sidebar.classList.add('collapsed');
+            document.body.classList.add('sidebar-collapsed');
+            sidebarToggle.classList.add('active');
+        }
+    
+        // Toggle sidebar
+        sidebarToggle.addEventListener('click', function() {
+            sidebar.classList.toggle('collapsed');
+            document.body.classList.toggle('sidebar-collapsed');
+            this.classList.toggle('active');
+    
+            // Save state to localStorage
+            localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+        });
+    
+
+        // Participant search (EXACT same as create_schedule)
+        const searchInput = document.getElementById("searchMember");
+        const members = document.querySelectorAll(".participant-item");
+
+        searchInput.addEventListener("keyup", function () {
+            const value = this.value.toLowerCase();
+
+            members.forEach(member => {
+                // User Name
+                const userName = member.querySelector("h3").textContent.toLowerCase();
+
+                // User ID
+                const userId = member.querySelector("input").value.toLowerCase();
+
+                // Department Name
+                const deptElement = member.querySelector("div.department");
+                const department = deptElement ? deptElement.textContent.toLowerCase() : "";
+
+                // Email
+                const emailText = Array.from(member.querySelectorAll("div")).find(div => div.textContent.trim().startsWith("Email:"));
+                const email = emailText ? emailText.textContent.replace("Email:", "").trim().toLowerCase() : "";
+
+                // Check if search term matches any field
+                if (
+                    userName.includes(value) ||
+                    department.includes(value) ||
+                    email.includes(value) ||
+                    userId.includes(value)
+                ) {
+                    member.style.display = "block";
+                } else {
+                    member.style.display = "none";
+                }
+            });
+        });
+    </script>
+</body>
+</html>

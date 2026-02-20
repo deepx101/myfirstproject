@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Department Calendar</title>
+    <!-- FullCalendar CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.css" rel="stylesheet">
+    <!-- FullCalendar JS -->
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <!-- Sidebar Toggle -->
+    <button class="sidebar-toggle" id="sidebarToggle">
+        <span></span>
+        <span></span>
+        <span></span>
+    </button>
+
+    <header class="top-nav">
+        <h2>Department Calendar</h2>
+        <a href="{{ url_for('faculty_dashboard') }}" class="back-btn">← Dashboard</a>
+        <a href="{{ url_for('logout') }}" class="logout-btn">Logout</a>
+    </header>
+
+    <div class="container">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <ul>
+                <li><a href="{{ url_for('create_schedule') }}">Create Schedule</a></li>
+                <li><a href="{{ url_for('my_schedule') }}">My Schedule</a></li>
+                <li><a href="{{ url_for('department_calendar') }}" class="active">Department Calendar</a></li>
+                <li><a href="{{ url_for('profile') }}">Profile</a></li>
+            </ul>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+            <h3>📅 Department Meeting Calendar</h3>
+            
+            <div class="calendar-container">
+                <div id="calendar"></div>
+            </div>
+
+            <!-- Simple Meeting Info Box -->
+            <div id="eventBox" class="event-box">
+                <h4>Meeting Details</h4>
+                <p><strong>Title:</strong> <span id="boxTitle"></span></p>
+                <p><strong>Date:</strong> <span id="boxDate"></span></p>
+                <p><strong>Venue:</strong> <span id="boxVenue"></span></p>
+                <button onclick="closeBox()" class="close-btn">Close</button>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // Sidebar toggle
+        
+        const sidebarToggle = document.getElementById('sidebarToggle');
+        const sidebar = document.getElementById('sidebar');
+    
+        // Load saved state
+        if (localStorage.getItem('sidebarCollapsed') === 'true') {
+            sidebar.classList.add('collapsed');
+            document.body.classList.add('sidebar-collapsed');
+            sidebarToggle.classList.add('active');
+        }
+    
+        // Toggle sidebar
+        sidebarToggle.addEventListener('click', function() {
+            sidebar.classList.toggle('collapsed');
+            document.body.classList.toggle('sidebar-collapsed');
+            this.classList.toggle('active');
+    
+            // Save state to localStorage
+            localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+        });
+    
+
+        // FullCalendar with FIXED event highlighting
+        document.addEventListener('DOMContentLoaded', function () {
+    const eventsFromBackend = {{ events | tojson | safe }};
+    console.log('Events loaded:', eventsFromBackend); // DEBUG
+    
+    const calendarEl = document.getElementById('calendar');
+    const calendar = new FullCalendar.Calendar(calendarEl, {
+        initialView: 'dayGridMonth',
+        headerToolbar: {
+            left: 'prev,next today',
+            center: 'title',
+            right: ''
+        },
+        height: 'auto',
+        events: eventsFromBackend.map(e => ({
+            title: e.title,
+            date: e.date,  // ✅ Simple date string
+            backgroundColor: e.status === "past" ? "#dc3545" : "#28a745",
+            borderColor: e.status === "past" ? "#dc3545" : "#28a745",
+            textColor: 'white',
+            extendedProps: {
+                venue: e.venue
+            }
+        })),
+        eventClick: function(info) {
+            document.getElementById("boxTitle").innerText = info.event.title;
+            document.getElementById("boxDate").innerText = info.event.start.toDateString();
+            document.getElementById("boxVenue").innerText = info.event.extendedProps.venue;
+            document.getElementById("eventBox").style.display = "block";
+        }
+    });
+    
+    calendar.render();
+});
+
+function closeBox() {
+    document.getElementById("eventBox").style.display = "none";
+}
+    </script>
+</body>
+</html>

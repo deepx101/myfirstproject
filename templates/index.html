@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Meeting Scheduling System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body>
+
+    <!-- HEADER -->
+    <header class="header">
+        <div class="logo-container">
+            <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Punjabi University Logo" />
+            <h1>Smart Meeting Scheduling System</h1>
+        </div>
+    </header>
+
+    <!-- MAIN CONTENT -->
+    <main class="main-content">
+        <div class="welcome-box">
+            <h2>Welcome</h2>
+            <p>
+                Plan meetings with confidence. Our system automatically verifies member
+                availability and helps you create conflict-free schedules in just a few clicks.
+            </p>
+
+            <div class="button-group">
+                <a href="login.html" class="btn primary-btn">Login</a>
+                <a href="about.html" class="btn secondary-btn">About System</a>
+            </div>
+        </div>
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="footer">
+        <p>© 2026 Smart Meeting Scheduling System | University Project</p>
+    </footer>
+
+</body>
+</html>
+

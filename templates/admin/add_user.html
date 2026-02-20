@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Add User</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <!-- Sidebar Toggle -->
+    <button class="sidebar-toggle" id="sidebarToggle">
+        <span></span>
+        <span></span>
+        <span></span>
+    </button>
+
+    <header class="top-nav">
+        <h2>Add User</h2>
+        <a href="{{ url_for('admin_dashboard') }}" class="back-btn">← Dashboard</a>
+        <a href="{{ url_for('logout') }}" class="logout-btn">Logout</a>
+    </header>
+
+    <div class="container">
+        <!-- Admin Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <ul>
+                <li><a href="{{ url_for('add_department') }}">➕ Add Department</a></li>
+                <li><a href="{{ url_for('view_departments') }}">📋 View Departments</a></li>
+                <li><a href="{{ url_for('add_user') }}" class="active">👤 Add User</a></li>
+                <li><a href="{{ url_for('view_all_meetings') }}">📅 View Meetings</a></li>
+                <li><a href="{{ url_for('view_users') }}">👥 View Users</a></li>
+                <li><a href="{{ url_for('admin_profile') }}">👤 Profile</a></li>
+            </ul>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+            
+            <h3>Add New User</h3>
+            
+            <form method="POST" class="form-container">
+                <div class="form-group">
+                    <label for="name">Name</label>
+                    <input type="text" id="name" name="name" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" name="email" required>
+                </div>
+                <div class="form-group">
+                    <label for="mobile_no">Mobile Number *</label>
+                    <input type="tel" id="mobile_no" name="mobile_no" 
+                           pattern="[0-9]{10}" maxlength="10" required 
+                           >
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" required
+                    >
+                
+                </div>
+
+                <div class="form-group">
+                    <label for="role_id">Designation *</label>
+                    <select id="role_id" name="role_id" required>
+                        <option value="">-- Select Designation --</option>
+                        {% for role in roles %}
+                        <option value="{{ role.role_id }}">{{ role.role_name }}</option>
+                        {% endfor %}
+                    </select>
+                    <small style="color: #6c757d;">Select user role from available options</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="department_id">Department</label>
+                    <select id="department_id" name="department_id" required>
+                        <option value="">-- Select Department --</option>
+                        {% for dept in departments %}
+                        <option value="{{ dept.department_id }}">
+                            {{ dept.department_name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="submit-btn">Add User</button>
+                    <a href="{{ url_for('admin_dashboard') }}" class="back-btn-link">Cancel</a>
+                </div>
+            </form>
+        </main>
+    </div>
+
+    <!-- Same sidebar toggle script -->
+    <script>
+        const sidebarToggle = document.getElementById('sidebarToggle');
+        const sidebar = document.getElementById('sidebar');
+    
+        // Load saved state
+        if (localStorage.getItem('sidebarCollapsed') === 'true') {
+            sidebar.classList.add('collapsed');
+            document.body.classList.add('sidebar-collapsed');
+            sidebarToggle.classList.add('active');
+        }
+    
+        // Toggle sidebar
+        sidebarToggle.addEventListener('click', function() {
+            sidebar.classList.toggle('collapsed');
+            document.body.classList.toggle('sidebar-collapsed');
+            this.classList.toggle('active');
+    
+            // Save state to localStorage
+            localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+        });
+    </script>
+</body>
+</html>

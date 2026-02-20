@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit Admin Profile</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <button class="sidebar-toggle" id="sidebarToggle"><span></span><span></span><span></span></button>
+    
+    <header class="top-nav">
+        <h2>Edit Profile</h2>
+        <a href="{{ url_for('profile') }}" class="back-btn">← Profile</a>
+        <a href="{{ url_for('logout') }}" class="logout-btn">Logout</a>
+    </header>
+
+    <div class="container">
+        <aside class="sidebar" id="sidebar">
+            <ul>
+                {% if session.role_id == 101 %}
+                <li><a href="{{ url_for('create_schedule') }}">➕ Create Schedule</a></li>
+                <li><a href="{{ url_for('my_schedule') }}">📋 My Schedule</a></li>
+                <li><a href="{{ url_for('department_calendar') }}">📅 Department Calendar</a></li>
+                {% endif %}
+                <li><a href="{{ url_for('admin_profile') }}" class="active">👤 Profile</a></li>
+                <li><a href="{{ url_for('edit_profile') }}">✏️ Edit Profile</a></li>
+                <li class="active"><a href="{{ url_for('change_password') }}">🔐 Change Password</a></li>
+            </ul>
+        </aside>
+
+        <main class="content">
+            <div class="page-header">
+                <h3>Update Profile Information</h3>
+                <p><strong>✅ Editable:</strong> Name, Email, Mobile (updates immediately)</p>
+                <!-- <p><strong>🔒 Contact Admin:</strong> Department, Designation</p> -->
+            </div>
+
+            {% with messages = get_flashed_messages() %}
+                {% if messages %}
+                    {% for message in messages %}
+                    <div class="success-message">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <form method="POST" class="form-container">
+                <!-- ✅ IMMEDIATE EDITABLE FIELDS -->
+                <div class="form-section editable">
+                    <h4>📝 Personal Information (Updates Immediately)</h4>
+                    
+                    <div class="form-group">
+                        <label for="name">Full Name *</label>
+                        <input type="text" id="name" name="name" 
+                               value="{{ user.user_name }}" required maxlength="100">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="email">Email Address *</label>
+                        <input type="email" id="email" name="email" 
+                               value="{{ user.email }}" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="mobile_no">Mobile Number *</label>
+                        <input type="tel" id="mobile_no" name="mobile_no" 
+                               value="{{ user.user_mobileNo }}" 
+                               pattern="[0-9]{10}" maxlength="10" required
+                               placeholder="9876543210">
+                        <small>10-digit number only</small>
+                    </div>
+                </div>
+
+                <button type="submit" class="login-btn">✅ Update Profile</button>
+            </form>
+        </main>
+    </div>
+
+    <script>
+        const sidebarToggle = document.getElementById('sidebarToggle');
+        const sidebar = document.getElementById('sidebar');
+    
+        // Load saved state
+        if (localStorage.getItem('sidebarCollapsed') === 'true') {
+            sidebar.classList.add('collapsed');
+            document.body.classList.add('sidebar-collapsed');
+            sidebarToggle.classList.add('active');
+        }
+    
+        // Toggle sidebar
+        sidebarToggle.addEventListener('click', function() {
+            sidebar.classList.toggle('collapsed');
+            document.body.classList.toggle('sidebar-collapsed');
+            this.classList.toggle('active');
+    
+            // Save state to localStorage
+            localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+        });
+    </script>
+</body>
+</html>

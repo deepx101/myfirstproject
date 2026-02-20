@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>View Users</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+
+<body>
+    <!-- Sidebar Toggle -->
+    <button class="sidebar-toggle" id="sidebarToggle">
+        <span></span>
+        <span></span>
+        <span></span>
+    </button>
+
+    <header class="top-nav">
+        <h2>All Users</h2>
+        <a href="{{ url_for('admin_dashboard') }}" class="back-btn">← Dashboard</a>
+        <a href="{{ url_for('logout') }}" class="logout-btn">Logout</a>
+    </header>
+
+    <div class="container">
+        <!-- Admin Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <ul>
+                <li><a href="{{ url_for('add_department') }}">➕ Add Department</a></li>
+                <li><a href="{{ url_for('view_departments') }}">📋 View Departments</a></li>
+                <li><a href="{{ url_for('add_user') }}">👤 Add User</a></li>
+                <li><a href="{{ url_for('view_all_meetings') }}">📅 View Meetings</a></li>
+                <li><a href="{{ url_for('view_users') }}" class="active">👥 View Users</a></li>
+                <li><a href="{{ url_for('admin_profile') }}">👤 Profile</a></li>
+            </ul>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+            <div class="page-header">
+                <h3>All Users ({{ users|length if users else 0 }})</h3>
+                <div>
+                    <a href="{{ url_for('add_user') }}" class="add-btn">➕ Add New User</a>
+                    <a href="{{ url_for('registration_requests') }}" class="add-btn" style="background: #17a2b8;">📝 New
+                        Requests</a>
+                </div>
+            </div>
+
+            <!-- Search Section -->
+            <div class="search-section">
+                <form method="GET" action="{{ url_for('view_users') }}" class="search-form">
+                    <input type="text" name="q" value="{{ search_query if search_query else '' }}"
+                        placeholder="🔍 Search by name, email, department, or Designation...">
+                    <button type="submit">Search</button>
+                    {% if search_query %}
+                    <a href="{{ url_for('view_users') }}" class="clear-btn">Clear</a>
+                    {% endif %}
+                </form>
+
+                {% if search_query %}
+                <div class="search-results">
+                    Showing {{ users|length if users else 0 }} results for: "<strong>{{ search_query }}</strong>"
+                </div>
+                {% endif %}
+            </div>
+
+            {% if users %}
+            <!-- ✅ SCROLLABLE USERS LIST -->
+            <div class="meetings-list-container">
+                <div class="meetings-scrollable-list">
+                    {% for u in users %}
+                    <div class="user-card">
+                        <div class="user-header">
+                            <span class="user-sno">{{ loop.index }}</span>
+                            <span class="user-name">{{ u.user_name }}</span>
+                            <span class="user-badge {{ 'admin-badge' if u.role_id == 100 else 'faculty-badge' }}">
+                                {{ u.role_name or 'Faculty' }}
+                            </span>
+                        </div>
+                        <div class="user-details-grid">
+                            <div class="user-detail">
+                                <span class="detail-label">🆔 ID</span>
+                                <span class="detail-value">{{ u.user_id }}</span>
+                            </div>
+                            <div class="user-detail">
+                                <span class="detail-label">📧 Email</span>
+                                <span class="detail-value">{{ u.email[:30] }}{% if u.email|length > 30 %}...{% endif
+                                    %}</span>
+                            </div>
+                            <div class="user-detail">
+                                <span class="detail-label">📱 Mobile</span>
+                                <span class="detail-value">{{ u.user_mobileNo|default('N/A') }}</span> </div>
+                            <div class="user-detail">
+                                <span class="detail-label">🏢 Department</span>
+                                <span class="detail-value">{{ u.department_name or 'N/A' }}</span>
+                            </div>
+                        </div>
+                        <div class="user-actions">
+                            <a href="{{ url_for('edit_user', user_id=u.user_id) }}" class="action-edit">✏️ Edit</a>
+                            <a href="{{ url_for('delete_user', user_id=u.user_id) }}" class="action-delete"
+                                onclick="return confirm('Are you sure you want to delete {{ u.user_name }}?')">
+                                🗑️ Delete
+                            </a>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% else %}
+            <div class="no-data">
+                <p>{% if search_query %}No users found for "{{ search_query }}".{% else %}No users available.{% endif %}
+                </p>
+                <a href="{{ url_for('add_user') }}" class="btn">➕ Add User</a>
+            </div>
+            {% endif %}
+        </main>
+    </div>
+
+    <script>
+        const sidebarToggle = document.getElementById('sidebarToggle');
+        const sidebar = document.getElementById('sidebar');
+    
+        // Load saved state
+        if (localStorage.getItem('sidebarCollapsed') === 'true') {
+            sidebar.classList.add('collapsed');
+            document.body.classList.add('sidebar-collapsed');
+            sidebarToggle.classList.add('active');
+        }
+    
+        // Toggle sidebar
+        sidebarToggle.addEventListener('click', function() {
+            sidebar.classList.toggle('collapsed');
+            document.body.classList.toggle('sidebar-collapsed');
+            this.classList.toggle('active');
+    
+            // Save state to localStorage
+            localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+        });
+    </script>
+</body>
+
+</html>

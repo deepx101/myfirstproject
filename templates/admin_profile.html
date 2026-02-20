@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <!-- Sidebar Toggle Button -->
+    <button class="sidebar-toggle" id="sidebarToggle">
+        <span></span>
+        <span></span>
+        <span></span>
+    </button>
+
+    <header class="top-nav">
+        <h2>Admin Dashboard</h2>
+        <a href="{{ url_for('admin_dashboard') }}" class="back-btn">← Dashboard</a>
+        <a href="{{ url_for('logout') }}" class="logout-btn">Logout</a>
+    </header>
+
+    <div class="container">
+        <!-- Collapsible Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <ul>
+                <li><a href="{{ url_for('add_department') }}">➕ Add Department</a></li>
+                <li><a href="{{ url_for('view_departments') }}">📋 View Departments</a></li>
+                <li><a href="{{ url_for('add_user') }}">👤 Add User</a></li>
+                <li><a href="{{ url_for('view_all_meetings') }}">📅 View Meetings</a></li>
+                <li><a href="{{ url_for('view_users') }}">👥 View Users</a></li>
+                <li><a href="{{ url_for('admin_profile') }}">👤 Profile</a></li>
+            </ul>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+            <div class="profile-container">
+                <h2>My Profile</h2>
+                <div class="profile-item">
+                    <span>Name:</span> {{ user.user_name }}
+                </div>
+                <div class="profile-item">
+                    <span>Email:</span> {{ user.email }}
+                </div>
+                <div class="profile-item">
+                    <span>Mobile No:</span> {{ user.user_mobileNo or 'N/A' }}
+                </div>
+                <!-- <div class="profile-item">
+                    <span>Department:</span> {{ user.department_name or 'N/A' }}
+                </div> -->
+                <div class="profile-item">
+                    <span>Designation :</span> {{ user.role_name or 'N/A' }}
+                </div>
+                <div class="profile-item">
+                    <span>User ID :</span> {{ user.user_id or 'N/A' }}
+                </div>
+
+               
+                <a href="{{ url_for('edit_admin_profile') }}" class="btn">✏️ Edit Profile</a>
+                <a href="{{ url_for('change_password') }}" class="btn btn-primary">Change Password</a>
+            </div>
+        </main>
+    </div>
+
+    <!-- Same sidebar toggle script -->
+    <script>
+        const sidebarToggle = document.getElementById('sidebarToggle');
+        const sidebar = document.getElementById('sidebar');
+    
+        // Load saved state
+        if (localStorage.getItem('sidebarCollapsed') === 'true') {
+            sidebar.classList.add('collapsed');
+            document.body.classList.add('sidebar-collapsed');
+            sidebarToggle.classList.add('active');
+        }
+    
+        // Toggle sidebar
+        sidebarToggle.addEventListener('click', function() {
+            sidebar.classList.toggle('collapsed');
+            document.body.classList.toggle('sidebar-collapsed');
+            this.classList.toggle('active');
+    
+            // Save state to localStorage
+            localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+        });
+    </script>
+</body>
+</html>

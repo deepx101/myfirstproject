@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit User</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <!-- Sidebar Toggle -->
+    <button class="sidebar-toggle" id="sidebarToggle">
+        <span></span>
+        <span></span>
+        <span></span>
+    </button>
+
+    <header class="top-nav">
+        <h2>Edit User</h2>
+        <a href="{{ url_for('view_users') }}" class="back-btn">← Users</a>
+        <a href="{{ url_for('logout') }}" class="logout-btn">Logout</a>
+    </header>
+
+    <div class="container">
+        <!-- Admin Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <ul>
+                <li><a href="{{ url_for('add_department') }}">➕ Add Department</a></li>
+                <li><a href="{{ url_for('view_departments') }}">📋 View Departments</a></li>
+                <li><a href="{{ url_for('add_user') }}">👤 Add User</a></li>
+                <li><a href="{{ url_for('view_all_meetings') }}">📅 View Meetings</a></li>
+                <li><a href="{{ url_for('view_users') }}" class="active">👥 View Users</a></li>
+                <li><a href="{{ url_for('admin_profile') }}">👤 Profile</a></li>
+            </ul>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+            <h3>Edit User: {{ user.user_name }}</h3>
+            
+            <form method="POST" class="form-container">
+                <div class="form-group">
+                    <label for="user_name">Name</label>
+                    <input type="text" id="user_name" name="user_name" value="{{ user.user_name }}" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" name="email" value="{{ user.email }}" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="department_id">Department</label>
+                    <select id="department_id" name="department_id" required>
+                        <option value="">-- Select Department --</option>
+                        {% for d in departments %}
+                        <option value="{{ d.department_id }}"
+                                {% if d.department_id == user.department_id %}selected{% endif %}>
+                            {{ d.department_name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="role_id">Desinnation</label>
+                    <select id="role_id" name="role_id" required>
+                        {% for r in roles %}
+                        <option value="{{ r.role_id }}"
+                                {% if r.role_id == user.role_id %}selected{% endif %}>
+                            {{ r.role_name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="submit-btn">Update User</button>
+                    <a href="{{ url_for('view_users') }}" class="back-btn-link">Cancel</a>
+                </div>
+            </form>
+        </main>
+    </div>
+
+    <!-- Same sidebar toggle script -->
+    <script>
+        const sidebarToggle = document.getElementById('sidebarToggle');
+        const sidebar = document.getElementById('sidebar');
+    
+        // Load saved state
+        if (localStorage.getItem('sidebarCollapsed') === 'true') {
+            sidebar.classList.add('collapsed');
+            document.body.classList.add('sidebar-collapsed');
+            sidebarToggle.classList.add('active');
+        }
+    
+        // Toggle sidebar
+        sidebarToggle.addEventListener('click', function() {
+            sidebar.classList.toggle('collapsed');
+            document.body.classList.toggle('sidebar-collapsed');
+            this.classList.toggle('active');
+    
+            // Save state to localStorage
+            localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+        });
+    </script>
+</body>
+</html>

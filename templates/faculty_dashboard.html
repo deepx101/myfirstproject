@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Faculty Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <!-- Sidebar Toggle Button (same as other pages) -->
+    <button class="sidebar-toggle" id="sidebarToggle">
+        <span></span>
+        <span></span>
+        <span></span>
+    </button>
+
+    <!-- Top Header -->
+    <header class="top-nav">
+        <h2>Welcome, {{ user }}</h2>
+        <a href="{{ url_for('logout') }}" class="logout-btn">Logout</a>
+    </header>
+
+    <div class="container">
+        <!-- Sidebar (same structure) -->
+        <aside class="sidebar" class="sidebar collapsed" id="sidebar">
+            <ul>
+                <li><a href="{{ url_for('create_schedule') }}">📅 Create Schedule</a></li>
+                <li><a href="{{ url_for('my_schedule') }}">🗂 My Schedule</a></li>
+                <li><a href="{{ url_for('department_calendar') }}">🏢 Department Calendar</a></li>
+                <li><a href="{{ url_for('profile') }}">👤 Profile</a></li>
+            </ul>
+        </aside>
+
+        <!-- Main Content - Simple Dashboard -->
+        <main class="content">
+            <h3>Faculty Dashboard</h3>
+            <p style="font-size: 16px; margin-bottom: 30px;">Plan meetings, check schedules, monitor department calendar, and update profile.</p>
+            
+            <div class="dashboard-grid">
+                <div class="dashboard-card">
+                    <h4>📅 Create Schedule</h4>
+                    <p>Create new department meetings with participants.</p>
+                    <a href="{{ url_for('create_schedule') }}" class="dashboard-link">Go to Schedule</a>
+                </div>
+                
+                <div class="dashboard-card">
+                    <h4>🗂 My Schedule</h4>
+                    <p>View all your scheduled meetings.</p>
+                    <a href="{{ url_for('my_schedule') }}" class="dashboard-link">View Schedule</a>
+                </div>
+                
+                <div class="dashboard-card">
+                    <h4>🏢 Department Calendar</h4>
+                    <p>View department-wide meeting calendar.</p>
+                    <a href="{{ url_for('department_calendar') }}" class="dashboard-link">View Calendar</a>
+                </div>
+                
+                <div class="dashboard-card">
+                    <h4>👤 Profile</h4>
+                    <p>Update your profile information.</p>
+                    <a href="{{ url_for('profile') }}" class="dashboard-link">View Profile</a>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Same sidebar toggle JavaScript -->
+    <script>
+        const sidebarToggle = document.getElementById('sidebarToggle');
+        const sidebar = document.getElementById('sidebar');
+    
+        // Load saved state
+        if (localStorage.getItem('sidebarCollapsed') === 'true') {
+            sidebar.classList.add('collapsed');
+            document.body.classList.add('sidebar-collapsed');
+            sidebarToggle.classList.add('active');
+        }
+    
+        // Toggle sidebar
+        sidebarToggle.addEventListener('click', function() {
+            sidebar.classList.toggle('collapsed');
+            document.body.classList.toggle('sidebar-collapsed');
+            this.classList.toggle('active');
+    
+            // Save state to localStorage
+            localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+
+    <script>
+        // Instant sidebar state
+        const collapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+        if (collapsed) {
+            document.body.classList.add('sidebar-collapsed');
+            window.addEventListener('DOMContentLoaded', () => {
+                const sidebar = document.getElementById('sidebar');
+                const toggleBtn = document.getElementById('sidebarToggle');
+                if (sidebar) sidebar.classList.add('collapsed');
+                if (toggleBtn) toggleBtn.classList.add('active');
+            });
+        }
+    </script>
+</head>
+
+<body>
+    <!-- Sidebar Toggle -->
+    <button class="sidebar-toggle" id="sidebarToggle"><span></span><span></span><span></span></button>
+
+    <!-- Top Navigation -->
+    <header class="top-nav">
+        <h2>About</h2>
+        <a href="{{ url_for('admin_dashboard') }}" class="back-btn">← Dashboard</a>
+        <a href="{{ url_for('logout') }}" class="logout-btn">Logout</a>
+    </header>
+
+    <div class="container">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <ul>
+                <li><a href="{{ url_for('admin_dashboard') }}">🏠 Dashboard</a></li>
+                <li><a href="{{ url_for('about') }}" class="active">ℹ️ About</a></li>
+                <li><a href="{{ url_for('profile') }}">👤 Profile</a></li>
+                <li><a href="{{ url_for('view_departments') }}">📋 Departments</a></li>
+                <li><a href="{{ url_for('view_users') }}">👥 Users</a></li>
+            </ul>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+            <div class="about-card">
+                <h3>About This Project</h3>
+                <p>
+                    This project is a web-based Meeting Management System developed to simplify scheduling,
+                    participant tracking, and department management. It allows admins and users to create,
+                    view, and manage meetings efficiently.
+                </p>
+
+                <h3>About Me</h3>
+                <p>
+                    Hello! I am Amandeep Singh, a computer science enthusiast and aspiring government job candidate.
+                    I developed this system as a personal project to enhance my programming skills, UI/UX design, and
+                    full-stack development knowledge. This project is built using Python (Flask), HTML, CSS, and JS.
+                </p>
+
+                <h3>Technologies Used</h3>
+                <ul>
+                    <li>Frontend: HTML, CSS, JavaScript</li>
+                    <li>Backend: Python Flask</li>
+                    <li>Database: MySQL</li>
+                    <li>Version Control: Git</li>
+                </ul>
+
+                <h3>Contact</h3>
+                <p>
+                    You can reach me at: <strong>your-email@example.com</strong>
+                </p>
+            </div>
+        </main>
+    </div>
+
+    <!-- Sidebar Toggle Script -->
+    <script>
+        const sidebarToggle = document.getElementById('sidebarToggle');
+        const sidebar = document.getElementById('sidebar');
+
+        sidebarToggle.addEventListener('click', function () {
+            sidebar.classList.toggle('collapsed');
+            document.body.classList.toggle('sidebar-collapsed');
+            this.classList.toggle('active');
+            localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+        });
+    </script>
+</body>
+
+</html>

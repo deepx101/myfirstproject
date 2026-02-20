@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Schedules</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        /* 🔍 Search Box - consistent style */
+.search-section {
+    margin-bottom: 20px;
+}
+
+.search-section input[type="text"] {
+    width: 100%;
+    max-width: 500px;
+    padding: 10px 15px;
+    font-size: 16px;
+    border: 1px solid #ccc; /* light gray border */
+    border-radius: 8px;      /* rounded corners */
+    outline: none;
+    transition: all 0.2s ease-in-out;
+}
+
+.search-section input[type="text"]:focus {
+    border-color: #17a2b8;   /* same as "New Requests" button color */
+    box-shadow: 0 0 5px rgba(23, 162, 184, 0.5);
+}
+
+.search-section button {
+    padding: 10px 20px;
+    margin-left: 10px;
+    background-color: #17a2b8;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.2s ease-in-out;
+}
+
+.search-section button:hover {
+    background-color: #138496;
+}
+
+.search-section .clear-btn {
+    margin-left: 10px;
+    background-color: #f8f9fa;
+    color: #333;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    padding: 10px 15px;
+    text-decoration: none;
+    transition: all 0.2s ease-in-out;
+}
+
+.search-section .clear-btn:hover {
+    background-color: #e2e6ea;
+    border-color: #adb5bd;
+}
+
+    </style>
+</head>
+<body>
+    <button class="sidebar-toggle" id="sidebarToggle">
+        <span></span>
+        <span></span>
+        <span></span>
+    </button>
+
+    <header class="top-nav">
+        <h2>My Schedules</h2>
+        <a href="{{ url_for('faculty_dashboard') }}" class="back-btn">← Dashboard</a>
+        <a href="{{ url_for('logout') }}" class="logout-btn">Logout</a>
+    </header>
+
+    <div class="container">
+        <aside class="sidebar" id="sidebar">
+            <ul>
+                <li><a href="{{ url_for('create_schedule') }}">➕ Create Schedule</a></li>
+                <li><a href="{{ url_for('my_schedule') }}" class="active">📋 My Schedule</a></li>
+                <li><a href="{{ url_for('department_calendar') }}">📅 Department Calendar</a></li>
+                <li><a href="{{ url_for('profile') }}">👤 Profile</a></li>
+            </ul>
+        </aside>
+
+        <main class="content">
+            <!-- Search Section -->
+            <div class="search-section">
+                <input type="text" id="searchMeeting" placeholder="🔍 Search by title, department, venue, user ID, or name">
+            </div>
+
+            <div class="page-header">
+                <h3>My Schedules ({{ meetings|length if meetings else 0 }})</h3>
+            </div>
+
+            {% if meetings %}
+            <div class="meetings-list-container">
+                <div class="meetings-scrollable-list">
+                    {% for m in meetings %}
+                    <div class="meeting-card">
+                        <div class="meeting-header">
+                            <span class="meeting-sno">{{ loop.index }}</span>
+                            <span class="meeting-title">{{ m.meeting_title[:50] }}{% if m.meeting_title|length > 50 %}...{% endif %}</span>
+                        </div>
+                        <div class="meeting-details-grid">
+                            <div class="meeting-detail">
+                                <span class="detail-label">📅 Date</span>
+                                <span class="detail-value">{{ m.meeting_date.strftime('%d/%m/%Y') if m.meeting_date else 'TBD' }}</span>
+                            </div>
+                            <div class="meeting-detail">
+                                <span class="detail-label">🕒 Time</span>
+                                <span class="detail-value">{{ m.start_time }} - {{ m.end_time }}</span>
+                            </div>
+                            <div class="meeting-detail">
+                                <span class="detail-label">📍 Venue</span>
+                                <span class="detail-value venue">{{ m.venue or 'TBD' }}</span>
+                            </div>
+                            <div class="meeting-detail">
+                                <span class="detail-label">🏢 Dept</span>
+                                <span class="detail-value department">{{ m.department_name or '-' }}</span>
+                            </div>
+                            <div class="meeting-detail full-width">
+                                <span class="detail-label">👤 Created By</span>
+                                <span class="detail-value user-info">
+                                    {{ m.user_name }} (ID: {{ m.user_id }})<br>
+                                    <small style="color: #6c757d;">Mobile: {{ m.user_mobileNo or 'N/A' }}</small>
+                                </span>
+                            </div>
+                        </div>
+                        <div class="meeting-actions">
+                            <a href="{{ url_for('view_my_meeting_members', meeting_id=m.meeting_id) }}" 
+                               class="action-view approve-btn">
+                                👥 View Participants ({{ m.participant_count or 0 }})
+                            </a>
+                            {% if m.user_id == session.user_id %}
+                            <a href="{{ url_for('my_created_meetings') }}" 
+                               class="action-view members-btn">
+                                ✨ Edit Meeting
+                            </a>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% else %}
+            <div class="no-data">
+                <p>No meetings scheduled yet.</p>
+            </div>
+            {% endif %}
+        </main>
+    </div>
+
+    <script>
+        // Sidebar toggle
+        const sidebarToggle = document.getElementById('sidebarToggle');
+        const sidebar = document.getElementById('sidebar');
+
+        if (localStorage.getItem('sidebarCollapsed') === 'true') {
+            sidebar.classList.add('collapsed');
+            document.body.classList.add('sidebar-collapsed');
+            sidebarToggle.classList.add('active');
+        }
+
+        sidebarToggle.addEventListener('click', function() {
+            sidebar.classList.toggle('collapsed');
+            document.body.classList.toggle('sidebar-collapsed');
+            this.classList.toggle('active');
+            localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+        });
+
+        // ✅ Client-side Search
+        const searchInput = document.getElementById("searchMeeting");
+        const meetingCards = document.querySelectorAll(".meeting-card");
+
+        searchInput.addEventListener("keyup", function() {
+            const value = this.value.toLowerCase();
+
+            meetingCards.forEach(card => {
+                const title = card.querySelector(".meeting-title")?.textContent.toLowerCase() || "";
+                const venue = card.querySelector(".venue")?.textContent.toLowerCase() || "";
+                const department = card.querySelector(".department")?.textContent.toLowerCase() || "";
+                const userInfo = card.querySelector(".user-info")?.textContent.toLowerCase() || "";
+                
+                // user ID is inside user-info, so it's covered
+                if (
+                    title.includes(value) ||
+                    venue.includes(value) ||
+                    department.includes(value) ||
+                    userInfo.includes(value)
+                ) {
+                    card.style.display = "block";
+                } else {
+                    card.style.display = "none";
+                }
+            });
+        });
+    </script>
+</body>
+</html>

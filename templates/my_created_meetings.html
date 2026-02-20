@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Created Meetings</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <button class="sidebar-toggle" id="sidebarToggle"><span></span><span></span><span></span></button>
+    
+    <header class="top-nav">
+        <h2>My Created Meetings</h2>
+        <a href="{{ url_for('faculty_dashboard') }}" class="back-btn">← Dashboard</a>
+        <a href="{{ url_for('logout') }}" class="logout-btn">Logout</a>
+    </header>
+
+    <div class="container">
+        <aside class="sidebar" id="sidebar">
+            <ul>
+                <li><a href="{{ url_for('create_schedule') }}">➕ Create Schedule</a></li>
+                <li><a href="{{ url_for('my_schedule') }}">📋 My Schedule</a></li>
+                <li><a href="{{ url_for('my_created_meetings') }}" class="active">✏️ My Meetings</a></li>
+                <li><a href="{{ url_for('department_calendar') }}">📅 Dept Calendar</a></li>
+                <li><a href="{{ url_for('profile') }}">👤 Profile</a></li>
+            </ul>
+        </aside>
+
+        <main class="content">
+            <!-- Search -->
+            <div class="search-section">
+                <form method="GET" action="{{ url_for('my_created_meetings') }}" class="search-form">
+                    <input type="text" 
+                           name="q" 
+                           value="{{ search_query if search_query else '' }}"
+                           placeholder="🔍 Search my meetings....">
+                    <button type="submit">Search</button>
+                    {% if search_query %}
+                    <a href="{{ url_for('my_created_meetings') }}" class="clear-btn">Clear</a>
+                    {% endif %}
+                </form>
+
+
+              
+            </div>
+
+            <div class="page-header">
+                <h3>My Created Meetings ({{ meetings|length }})</h3>
+            </div>
+
+            {% if meetings %}
+            <div class="meetings-list-container">
+                <div class="meetings-scrollable-list">
+                    {% for m in meetings %}
+                    <div class="meeting-card">
+                        <div class="meeting-header">
+                            <span class="meeting-sno">{{ loop.index }}</span>
+                            <span class="meeting-title">{{ m.meeting_title[:40] }}{% if m.meeting_title|length > 40 %}...{% endif %}</span>
+                        </div>
+                        <div class="meeting-details-grid">
+                            <div class="meeting-detail">
+                                <span class="detail-label">📅 Date</span>
+                                <span class="detail-value">{{ m.meeting_date.strftime('%d/%m/%Y') }}</span>
+                            </div>
+                            <div class="meeting-detail">
+                                <span class="detail-label">🕒 Time</span>
+                                <span class="detail-value">{{ m.start_time }} - {{ m.end_time }}</span>
+                            </div>
+                            <div class="meeting-detail">
+                                <span class="detail-label">📍 Venue</span>
+                                <span class="detail-value">{{ m.venue or 'TBD' }}</span>
+                            </div>
+                            <div class="meeting-detail">
+                                <span class="detail-label">🏢 Dept</span>
+                                <span class="detail-value">{{ m.department_name }}</span>
+                            </div>
+                            <div class="meeting-detail full-width">
+                                <span class="detail-label">👥 Participants</span>
+                                <span class="detail-value">{{ m.participant_count }}</span>
+                            </div>
+                        </div>
+ <div class="meeting-actions">
+    <a href="{{ url_for('edit_meeting', meeting_id=m.meeting_id) }}" 
+       class="action-edit approve-btn">
+        ✏️ Edit/Reschedule
+    </a>
+    <!-- ✅ FIXED: Proper HTML escaping -->
+    <a href="{{ url_for('delete_meeting', meeting_id=m.meeting_id) }}" 
+       class="action-delete reject-btn"
+       onclick="return confirm('Delete meeting &quot;{{ m.meeting_title[:30] }}&quot;? This cannot be undone.');">
+        🗑️ Delete
+    </a>
+</div>
+
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% else %}
+            <div class="no-data">
+                <p>No meetings created by you yet.</p>
+                <a href="{{ url_for('create_schedule') }}" class="btn">➕ Create Meeting</a>
+            </div>
+            {% endif %}
+        </main>
+    </div>
+
+    <script>
+        // Sidebar toggle script (same as others)
+        const sidebarToggle = document.getElementById('sidebarToggle');
+        const sidebar = document.getElementById('sidebar');
+        sidebarToggle.addEventListener('click', function() {
+            sidebar.classList.toggle('collapsed');
+            document.body.classList.toggle('sidebar-collapsed');
+            this.classList.toggle('active');
+        });
+    </script>
+</body>
+</html>

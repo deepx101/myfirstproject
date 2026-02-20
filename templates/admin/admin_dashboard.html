@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Admin Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <!-- Sidebar Toggle Button -->
+    <button class="sidebar-toggle" id="sidebarToggle">
+        <span></span>
+        <span></span>
+        <span></span>
+    </button>
+
+    <header class="top-nav">
+        <h2>Admin Dashboard</h2>
+        <a href="{{ url_for('admin_dashboard') }}" class="back-btn">← Dashboard</a>
+        <a href="{{ url_for('logout') }}" class="logout-btn">Logout</a>
+    </header>
+
+    <div class="container">
+        <!-- Collapsible Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <ul>
+                <li><a href="{{ url_for('add_department') }}">➕ Add Department</a></li>
+                <li><a href="{{ url_for('view_departments') }}">📋 View Departments</a></li>
+                <li><a href="{{ url_for('add_user') }}">👤 Add User</a></li>
+                <li><a href="{{ url_for('view_all_meetings') }}">📅 View Meetings</a></li>
+                <li><a href="{{ url_for('view_users') }}">👥 View Users</a></li>
+                <li><a href="{{ url_for('admin_profile') }}">👤 Profile</a></li>
+            </ul>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+            <h3>Admin Control Panel</h3>
+            <p style="font-size: 16px; margin-bottom: 30px;">Manage departments, users, and meetings from the sidebar menu.</p>
+            
+            <div class="admin-stats">
+                <div class="stat-card">
+                    <h4>Departments</h4>
+                    <p>Manage department records</p>
+                    <a href="{{ url_for('view_departments') }}" class="stat-link">Manage →</a>
+                </div>
+                
+                <div class="stat-card">
+                    <h4>Users</h4>
+                    <p>Add and manage faculty users</p>
+                    <a href="{{ url_for('view_users') }}" class="stat-link">Manage →</a>
+                </div>
+                
+                <div class="stat-card">
+                    <h4>Meetings</h4>
+                    <p>View all scheduled meetings</p>
+                    <a href="{{ url_for('view_all_meetings') }}" class="stat-link">View All →</a>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Same sidebar toggle script -->
+    <script>
+        const sidebarToggle = document.getElementById('sidebarToggle');
+        const sidebar = document.getElementById('sidebar');
+    
+        // Load saved state
+        if (localStorage.getItem('sidebarCollapsed') === 'true') {
+            sidebar.classList.add('collapsed');
+            document.body.classList.add('sidebar-collapsed');
+            sidebarToggle.classList.add('active');
+        }
+    
+        // Toggle sidebar
+        sidebarToggle.addEventListener('click', function() {
+            sidebar.classList.toggle('collapsed');
+            document.body.classList.toggle('sidebar-collapsed');
+            this.classList.toggle('active');
+    
+            // Save state to localStorage
+            localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+        });
+    </script>
+</body>
+</html>

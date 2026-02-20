@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Registration Requests</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <button class="sidebar-toggle" id="sidebarToggle"><span></span><span></span><span></span></button>
+    
+    <header class="top-nav">
+        <h2>Registration Requests ({{ requests|length }})</h2>
+        <a href="{{ url_for('admin_dashboard') }}" class="back-btn">← Dashboard</a>
+        <a href="{{ url_for('logout') }}" class="logout-btn">Logout</a>
+    </header>
+
+    <div class="container">
+        <aside class="sidebar" id="sidebar">
+            <ul>
+                <li><a href="{{ url_for('add_department') }}">➕ Add Department</a></li>
+                <li><a href="{{ url_for('view_departments') }}">📋 View Departments</a></li>
+                <li><a href="{{ url_for('add_user') }}">👤 Add User</a></li>
+                <li><a href="{{ url_for('registration_requests') }}" class="active">📝 Registration Requests</a></li>
+                <li><a href="{{ url_for('view_users') }}">👥 View Users</a></li>
+                <li><a href="{{ url_for('admin_profile') }}">👤 Profile</a></li>
+            </ul>
+        </aside>
+
+        <main class="content">
+            {% if requests %}
+            <div class="meetings-list-container">
+                <div class="meetings-scrollable-list">
+                    {% for req in requests %}
+                    <div class="request-card">
+                        <div class="request-header">
+                            <span class="meeting-sno">{{ loop.index }}</span>
+                            <span class="meeting-title">{{ req.name }}</span>
+                        </div>
+                        <div class="request-details-grid">
+                            <div class="meeting-detail">
+                                <span class="detail-label">📧 Email</span>
+                                <span class="detail-value">{{ req.email }}</span>
+                            </div>
+                            <div class="meeting-detail">
+                                <span class="detail-label">💼 Designation</span>
+                                <span class="detail-value">{{ req.role_name or 'N/A' }}</span>
+                            </div>
+                            <div class="meeting-detail">
+                                <span class="detail-label">🏢 Department</span>
+                                <span class="detail-value">{{ req.department_name or 'N/A' }}</span>
+                            </div>
+                            <div class="meeting-detail">
+                                <span class="detail-label">📅 Requested</span>
+                                <span class="detail-value">{{ req.created_at.strftime('%d/%m/%Y %H:%M') if req.created_at else 'N/A' }}</span>
+                            </div>
+                            <div class="user-detail">
+                                <span class="detail-label">📱 Mobile</span>
+                                <span class="detail-value">{{ req.user_mobileNo|default('N/A') }}</span> </div>
+                        </div>
+                        <div class="request-actions">
+                            <a href="{{ url_for('approve_request', request_id=req.id) }}" 
+                               class="action-edit approve-btn"
+                               onclick="return confirm('Approve {{ req.name }} ({{ req.role_name or 'N/A' }})?')">
+                                ✅ Approve
+                            </a>
+                            <a href="{{ url_for('reject_request', request_id=req.id) }}" 
+                               class="action-delete reject-btn"
+                               onclick="return confirm('Reject {{ req.name }}?')">
+                                ❌ Reject
+                            </a>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% else %}
+            <div class="no-data">
+                <p>No pending registration requests.</p>
+            </div>
+            {% endif %}
+        </main>
+    </div>
+
+    <script>
+        const sidebarToggle = document.getElementById('sidebarToggle');
+        const sidebar = document.getElementById('sidebar');
+    
+        // Load saved state
+        if (localStorage.getItem('sidebarCollapsed') === 'true') {
+            sidebar.classList.add('collapsed');
+            document.body.classList.add('sidebar-collapsed');
+            sidebarToggle.classList.add('active');
+        }
+    
+        // Toggle sidebar
+        sidebarToggle.addEventListener('click', function() {
+            sidebar.classList.toggle('collapsed');
+            document.body.classList.toggle('sidebar-collapsed');
+            this.classList.toggle('active');
+    
+            // Save state to localStorage
+            localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+        });
+    </script>
+</body>
+</html>

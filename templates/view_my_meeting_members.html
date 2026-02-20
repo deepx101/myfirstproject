@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Meeting Participants</title>
+    
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+
+<body>
+    <button class="sidebar-toggle" id="sidebarToggle"><span></span><span></span><span></span></button>
+
+    <header class="top-nav">
+        <h2>Meeting Participants</h2>
+        <a href="{{ url_for('my_schedule') }}" class="back-btn">← My Schedule</a>
+        <a href="{{ url_for('logout') }}" class="logout-btn">Logout</a>
+    </header>
+
+    <div class="container">
+        <aside class="sidebar" id="sidebar">
+            <ul>
+                <li><a href="{{ url_for('create_schedule') }}">➕ Create Schedule</a></li>
+                <li><a href="{{ url_for('my_schedule') }}">📋 My Schedule</a></li>
+                <li><a href="{{ url_for('department_calendar') }}">📅 Department Calendar</a></li>
+                <li><a href="{{ url_for('profile') }}">👤 Profile</a></li>
+            </ul>
+        </aside>
+
+        <main class="content">
+             <!-- Meeting Summary -->
+             <div class="meeting-summary-card">
+                <h3>{{ meeting.meeting_title }}</h3>
+                <div>{{ meeting.meeting_date.strftime('%d/%m/%Y') }} | {{ meeting.start_time }} - {{ meeting.end_time }}</div>
+                <div>📍 {{ meeting.department_name }} | 👤 {{ meeting.creator_name }} (ID: {{ meeting.creator_id }})</div>
+            </div>
+
+            <div class="page-header">
+                <h3>Participants ({{ members|length }})</h3>
+            </div>
+
+            {% if members %}
+            <div class="meetings-list-container">
+                <div class="meetings-scrollable-list">
+                    {% for member in members %}
+                    <div class="meeting-card">
+                        <div class="meeting-header">
+                            <span class="meeting-sno">{{ loop.index }}</span>
+                            <span class="meeting-title">{{ member.user_name }} (ID: {{ member.user_id }})</span>
+                        </div>
+                        <div class="meeting-details-grid">
+                            <div class="meeting-detail">
+                                <span class="detail-label">📧 Email</span>
+                                <span class="detail-value">{{ member.email }}</span>
+                            </div>
+                            <div class="meeting-detail">
+                                <span class="detail-label">💼 Designation</span>
+                                <span class="detail-value">{{ member.role_name or 'User' }}</span>
+                            </div>
+                            <div class="meeting-detail">
+                                <span class="detail-label">📱 Mobile</span>
+                                <span class="detail-value">{{ member.user_mobileNo or 'N/A' }}</span>
+                            </div>
+                            <div class="meeting-detail">
+                                <span class="detail-label">🏢 Department</span>
+                                <span class="detail-value">{{ member.department_name }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% else %}
+            <div class="no-data">
+                <p>No participants for this meeting.</p>
+            </div>
+            {% endif %}
+        </main>
+    </div>
+
+    <script>
+        const sidebarToggle = document.getElementById('sidebarToggle');
+        const sidebar = document.getElementById('sidebar');
+    
+        // Load saved state
+        if (localStorage.getItem('sidebarCollapsed') === 'true') {
+            sidebar.classList.add('collapsed');
+            document.body.classList.add('sidebar-collapsed');
+            sidebarToggle.classList.add('active');
+        }
+    
+        // Toggle sidebar
+        sidebarToggle.addEventListener('click', function() {
+            sidebar.classList.toggle('collapsed');
+            document.body.classList.toggle('sidebar-collapsed');
+            this.classList.toggle('active');
+    
+            // Save state to localStorage
+            localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+        });
+    </script>
+</body>
+
+</html>
