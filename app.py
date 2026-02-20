@@ -1,12 +1,11 @@
 from flask import Flask, flash, render_template, request, redirect, url_for, session
-import mysql.connector
+import psycopg2
+import psycopg2.extras
 from werkzeug.security import check_password_hash, generate_password_hash
 import calendar
 from datetime import datetime, date
 from functools import wraps
 import smtplib
-# from email.mime.text import MimeText
-# from email.mime.multipart import MimeMultipart
 import os
 
 
@@ -20,16 +19,54 @@ SMTP_SERVER = 'smtp.gmail.com'
 SMTP_PORT = 587
 SENDER_EMAIL = os.environ.get("SENDER_EMAIL")
 SENDER_PASSWORD = os.environ.get("SENDER_PASSWORD")
-# ---------------- DATABASE CONNECTION ----------------
-conn = mysql.connector.connect(
-    host="localhost",
-    user="aman",
-    password="aman123",
-    database="meeting_scheduler_db",
-)
-cursor = conn.cursor(dictionary=True)
-# ----------------Helper functions-------------
 
+# ---------------- DATABASE CONNECTION ----------------
+def get_db():
+    """Get a new database connection per request."""
+    db_url = os.environ.get('DATABASE_URL', '')
+    # Render gives 'postgres://' but psycopg2 needs 'postgresql://'
+    if db_url.startswith('postgres://'):
+        db_url = db_url.replace('postgres://', 'postgresql://', 1)
+    conn = psycopg2.connect(db_url)
+    return conn
+
+def execute_query(query, params=None, fetch='all', commit=False):
+    """
+    Execute a query and return results.
+    fetch: 'all', 'one', or None
+    commit: True for INSERT/UPDATE/DELETE
+    Returns: fetched rows (as dicts), lastrowid for INSERT, or None
+    """
+    # PostgreSQL uses %s placeholders — same as MySQL, so no query changes needed.
+    conn = get_db()
+    try:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(query, params)
+        result = None
+        if fetch == 'all':
+            result = cursor.fetchall()
+            # Convert RealDictRow list to plain list of dicts
+            result = [dict(row) for row in result]
+        elif fetch == 'one':
+            row = cursor.fetchone()
+            result = dict(row) if row else None
+        if commit:
+            conn.commit()
+            # For INSERT, return the last inserted id
+            if query.strip().upper().startswith('INSERT'):
+                # PostgreSQL uses RETURNING or lastval()
+                cursor.execute("SELECT lastval()")
+                last_id = cursor.fetchone()
+                result = last_id[0] if last_id else None
+        return result
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+
+# ----------------Helper functions-------------
 
 def get_session_user_info():
     """Safely get user info from session"""
@@ -58,45 +95,44 @@ def admin_required(f):
             flash("Please login first!")
             return redirect(url_for('login'))
         role_id = get_role(session['user_id'])
-        if role_id != 100:  # Admin role
+        if role_id != 100:
             flash("Admin access required!")
             return redirect(url_for('faculty_dashboard'))
         return f(*args, **kwargs)
     return decorated_function
 
 
-def get_role(user_id):  # ✅ MUST have user_id parameter
+def get_role(user_id):
     """Get user role from database"""
-    cursor.execute("SELECT role_id FROM user WHERE user_id = %s", (user_id,))
-    result = cursor.fetchone()
+    result = execute_query(
+        'SELECT role_id FROM "user" WHERE user_id = %s', (user_id,), fetch='one'
+    )
     return result['role_id'] if result else None
 
 
 def get_departments():
-    cursor.execute("SELECT * FROM department ORDER BY department_name")
-    return cursor.fetchall()
+    return execute_query(
+        "SELECT * FROM department ORDER BY department_name", fetch='all'
+    )
 
 
 def get_roles():
     """Get all roles from database"""
-    cursor.execute("""
-        SELECT role_id, role_name 
-        FROM role 
-        WHERE role_id != 100  -- Exclude Admin role
-        ORDER BY role_name
-    """)
-    return cursor.fetchall()
+    return execute_query(
+        """SELECT role_id, role_name FROM role WHERE role_id != 100 ORDER BY role_name""",
+        fetch='all'
+    )
+
+
 def send_meeting_email(recipients, action, meeting_info):
     """Send notification email to meeting members."""
-    
-    # CUSTOM SUBJECTS WITHOUT EMOJIS (works everywhere)
     if action == 'created':
         subject = f'New Meeting Created: {meeting_info["title"]}'
     elif action == 'updated':
         subject = f'Meeting Updated: {meeting_info["title"]}'
-    else:  # deleted/cancelled
+    else:
         subject = f'Meeting Cancelled: {meeting_info["title"]}'
-    
+
     body = f"""
 Meeting {action.upper()} Notification:
 
@@ -106,13 +142,13 @@ Time: {meeting_info["start_time"]} to {meeting_info["end_time"]}
 Venue: {meeting_info.get("venue", "TBD")}
 Department: {meeting_info.get("dept_name", "N/A")}
 """
-    
+
     message = f"""From: {SENDER_EMAIL}
 To: {', '.join(recipients)}
 Subject: {subject}
 
 {body}"""
-    
+
     try:
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
         server.starttls()
@@ -123,25 +159,23 @@ Subject: {subject}
     except Exception as e:
         print(f"❌ Email failed: {e}")
 
-# ---------------- LOGIN ----------------
 
+# ---------------- LOGIN ----------------
 
 @app.route("/", methods=["GET", "POST"])
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        identifier = request.form['username']  # Can be user_id OR email
+        identifier = request.form['username']
         password = request.form['password']
 
-        # ✅ LOGIN WITH USER_ID OR EMAIL
-        cursor.execute("""
-            SELECT * FROM user 
-            WHERE user_id = %s OR email = %s
-        """, (identifier, identifier))
-        user = cursor.fetchone()
+        user = execute_query(
+            'SELECT * FROM "user" WHERE user_id = %s OR email = %s',
+            (identifier, identifier),
+            fetch='one'
+        )
 
         if user and check_password_hash(user['password_hash'], password):
-            # ✅ SET ALL SESSION VARIABLES
             session['user_id'] = user['user_id']
             session['user_name'] = user['user_name']
             session['email'] = user['email']
@@ -156,29 +190,24 @@ def login():
 
     return render_template('login.html')
 
-# ---------------- DASHBOARDS ----------------
 
+# ---------------- DASHBOARDS ----------------
 
 @app.route("/admin/dashboard")
 def admin_dashboard():
     if "user_id" not in session or session.get("role_id") != 100:
         return redirect(url_for("login"))
-
-    # ✅ SAFE ACCESS - use .get() method
     user_name = session.get("user_name", "Admin")
     return render_template("admin/admin_dashboard.html", user=user_name)
 
 
 @app.route("/faculty/dashboard")
 def faculty_dashboard():
-    # if "user_id" not in session or session.get("role_id") != 101:
-    #     return redirect(url_for("login"))
-
-    # ✅ SAFE ACCESS - use .get() method
     user_name = session.get("user_name", "Faculty")
     return render_template("faculty_dashboard.html", user=user_name)
-# -------------------Admin Dashboard------------------
 
+
+# -------------------Admin Dashboard------------------
 
 @app.route("/admin/add-department", methods=["GET", "POST"])
 def add_department():
@@ -187,19 +216,14 @@ def add_department():
 
     if request.method == "POST":
         department_name = request.form["department_name"]
-
-        cursor.execute(
+        execute_query(
             "INSERT INTO department (department_name) VALUES (%s)",
-            (department_name,)
+            (department_name,),
+            commit=True
         )
-        conn.commit()
-
         return redirect(url_for("view_departments"))
 
     return render_template("admin/add_department.html")
-
-# -------------view department---------------
-# -------------view department with search----------------
 
 
 @app.route("/admin/view-departments", methods=["GET"])
@@ -207,58 +231,47 @@ def view_departments():
     if "user_id" not in session or session["role_id"] != 100:
         return redirect(url_for("login"))
 
-    # Get search keyword
     search = request.args.get("search", "").strip()
 
     if search:
-        cursor.execute(
-            "SELECT * FROM department WHERE department_name LIKE %s",
-            ("%" + search + "%",)
+        departments = execute_query(
+            "SELECT * FROM department WHERE department_name ILIKE %s",
+            ("%" + search + "%",),
+            fetch='all'
         )
     else:
-        cursor.execute("SELECT * FROM department")
-
-    departments = cursor.fetchall()
+        departments = execute_query("SELECT * FROM department", fetch='all')
 
     return render_template(
         "admin/view_departments.html",
         departments=departments,
-        search_query=search  # Pass search term to template
+        search_query=search
     )
 
 
-# ----------------delete department----------------
 @app.route("/admin/delete-department/<int:dept_id>")
 def delete_department(dept_id):
     if "user_id" not in session or session["role_id"] != 100:
         return redirect(url_for("login"))
 
-    # Check users
-    cursor.execute(
-        "SELECT COUNT(*) AS total FROM user WHERE department_id=%s",
-        (dept_id,)
-    )
-    users_count = cursor.fetchone()["total"]
+    users_count = execute_query(
+        'SELECT COUNT(*) AS total FROM "user" WHERE department_id=%s',
+        (dept_id,), fetch='one'
+    )['total']
 
-    # Check meetings
-    cursor.execute(
+    meetings_count = execute_query(
         "SELECT COUNT(*) AS total FROM meeting WHERE department_id=%s",
-        (dept_id,)
-    )
-    meetings_count = cursor.fetchone()["total"]
+        (dept_id,), fetch='one'
+    )['total']
 
     if users_count > 0 or meetings_count > 0:
         return "❌ Cannot delete department. Users or meetings exist."
 
-    cursor.execute(
+    execute_query(
         "DELETE FROM department WHERE department_id=%s",
-        (dept_id,)
+        (dept_id,), commit=True, fetch=None
     )
-    conn.commit()
-
     return redirect(url_for("view_departments"))
-
-# -------------------Search Department--------------
 
 
 @app.route("/admin/search-departments")
@@ -269,18 +282,13 @@ def search_departments():
     keyword = request.args.get("q", "").strip()
 
     if keyword == "":
-        cursor.execute("SELECT * FROM department")
+        departments = execute_query("SELECT * FROM department", fetch='all')
     else:
-        cursor.execute(
-            "SELECT * FROM department WHERE department_name LIKE %s",
-            ("%" + keyword + "%",)
+        departments = execute_query(
+            "SELECT * FROM department WHERE department_name ILIKE %s",
+            ("%" + keyword + "%",), fetch='all'
         )
-
-    departments = cursor.fetchall()
     return {"departments": departments}
-
-# ------------view users----------------------
-# ------------view users with search----------------------
 
 
 @app.route("/admin/view-users")
@@ -288,37 +296,32 @@ def view_users():
     if "user_id" not in session or session["role_id"] != 100:
         return redirect(url_for("login"))
 
-    # Get search keyword
     keyword = request.args.get("q", "").strip()
 
     query = """
-   SELECT u.user_id, u.user_name, u.email, u.user_mobileNo,
-       d.department_name, r.role_name, u.role_id
-FROM user u
-LEFT JOIN department d ON u.department_id = d.department_id
-LEFT JOIN role r ON u.role_id = r.role_id
+        SELECT u.user_id, u.user_name, u.email, u.user_mobileno,
+               d.department_name, r.role_name, u.role_id
+        FROM "user" u
+        LEFT JOIN department d ON u.department_id = d.department_id
+        LEFT JOIN role r ON u.role_id = r.role_id
     """
     params = []
 
     if keyword:
         query += """
-        WHERE u.user_name LIKE %s
-           OR u.email LIKE %s
-           OR d.department_name LIKE %s
-           OR r.role_name LIKE %s
+        WHERE u.user_name ILIKE %s
+           OR u.email ILIKE %s
+           OR d.department_name ILIKE %s
+           OR r.role_name ILIKE %s
         """
         params = ["%" + keyword + "%"] * 4
 
-    query += " ORDER BY u.user_id"
+    query += ' ORDER BY u.user_id'
 
-    cursor.execute(query, params)
-    users = cursor.fetchall()
-
-    # Filter out users with role_id 100
-    users = [user for user in users if user['role_id'] != 100]
+    users = execute_query(query, params if params else None, fetch='all')
+    users = [u for u in users if u['role_id'] != 100]
 
     return render_template("admin/view_users.html", users=users, search_query=keyword)
-# -------------------edit user----------------------
 
 
 @app.route("/admin/edit-user/<int:user_id>", methods=["GET", "POST"])
@@ -332,34 +335,19 @@ def edit_user(user_id):
         department_id = request.form.get("department_id")
         role_id = request.form["role_id"]
 
-        cursor.execute("""
-            UPDATE user
-            SET user_name=%s, email=%s,
-                department_id=%s, role_id=%s
+        execute_query("""
+            UPDATE "user"
+            SET user_name=%s, email=%s, department_id=%s, role_id=%s
             WHERE user_id=%s
-        """, (user_name, email, department_id, role_id, user_id))
+        """, (user_name, email, department_id, role_id, user_id), commit=True, fetch=None)
 
-        conn.commit()
         return redirect(url_for("view_users"))
 
-    # GET data
-    cursor.execute("SELECT * FROM user WHERE user_id=%s", (user_id,))
-    user = cursor.fetchone()
+    user = execute_query('SELECT * FROM "user" WHERE user_id=%s', (user_id,), fetch='one')
+    departments = execute_query("SELECT * FROM department", fetch='all')
+    roles = execute_query("SELECT * FROM role", fetch='all')
 
-    cursor.execute("SELECT * FROM department")
-    departments = cursor.fetchall()
-
-    cursor.execute("SELECT * FROM role")
-    roles = cursor.fetchall()
-
-    return render_template(
-        "admin/edit_user.html",
-        user=user,
-        departments=departments,
-        roles=roles
-    )
-
-# -----------delete user--------------------
+    return render_template("admin/edit_user.html", user=user, departments=departments, roles=roles)
 
 
 @app.route("/admin/delete-user/<int:user_id>")
@@ -367,12 +355,8 @@ def delete_user(user_id):
     if "user_id" not in session or session["role_id"] != 100:
         return redirect(url_for("login"))
 
-    cursor.execute("DELETE FROM user WHERE user_id=%s", (user_id,))
-    conn.commit()
-
+    execute_query('DELETE FROM "user" WHERE user_id=%s', (user_id,), commit=True, fetch=None)
     return redirect(url_for("view_users"))
-
-# -----------search meetings------------------------------
 
 
 @app.route("/admin/search-meetings")
@@ -383,34 +367,25 @@ def search_meetings():
     keyword = request.args.get("q", "").strip()
 
     query = """
-        SELECT 
-            m.meeting_title,
-            m.meeting_date,
-            m.start_time,
-            m.end_time,
-            m.venue,
-            d.department_name,
-            u.user_name
+        SELECT m.meeting_title, m.meeting_date, m.start_time, m.end_time,
+               m.venue, d.department_name, u.user_name
         FROM meeting m
         JOIN department d ON m.department_id = d.department_id
-        JOIN user u ON m.user_id = u.user_id
+        JOIN "user" u ON m.user_id = u.user_id
     """
-
     params = []
 
     if keyword:
         query += """
-        WHERE m.meeting_title LIKE %s
-           OR d.department_name LIKE %s
-           OR u.user_name LIKE %s
+        WHERE m.meeting_title ILIKE %s
+           OR d.department_name ILIKE %s
+           OR u.user_name ILIKE %s
         """
         params = ["%" + keyword + "%"] * 3
 
-    cursor.execute(query, params)
-    results = cursor.fetchall()
+    results = execute_query(query, params if params else None, fetch='all')
 
     meetings = []
-
     for m in results:
         meetings.append({
             "meeting_title": m["meeting_title"],
@@ -423,16 +398,15 @@ def search_meetings():
         })
 
     return {"meetings": meetings}
-#--------------View my created meetings and edit meetings---------
-# ---------------- MY CREATED MEETINGS (Creator View + Edit) ----------------
+
+
+# ---------------- MY CREATED MEETINGS ----------------
+
 @app.route("/faculty/my-created-meetings")
 @login_required
 def my_created_meetings():
-    # if session.get("role_id") != 101:
-    #     return redirect(url_for("login"))
-    
     keyword = request.args.get("q", "").strip()
-    
+
     query = """
     SELECT m.meeting_id, m.meeting_title, m.meeting_date, m.start_time, m.end_time,
            m.venue, d.department_name, COUNT(mp.participant_id) as participant_count
@@ -442,58 +416,51 @@ def my_created_meetings():
     WHERE m.user_id = %s
     """
     params = [session["user_id"]]
-    
+
     if keyword:
-        query += " AND m.meeting_title LIKE %s OR d.department_name LIKE %s"
+        query += " AND (m.meeting_title ILIKE %s OR d.department_name ILIKE %s)"
         params.extend(["%" + keyword + "%"] * 2)
-    
-    query += " GROUP BY m.meeting_id ORDER BY m.meeting_date DESC"
-    
-    cursor.execute(query, params)
-    meetings = cursor.fetchall()
-    
+
+    query += " GROUP BY m.meeting_id, m.meeting_title, m.meeting_date, m.start_time, m.end_time, m.venue, d.department_name ORDER BY m.meeting_date DESC"
+
+    meetings = execute_query(query, params, fetch='all')
     return render_template("my_created_meetings.html", meetings=meetings, search_query=keyword)
 
 
 @app.route("/faculty/meeting-edit/<int:meeting_id>", methods=['GET', 'POST'])
 @login_required
 def edit_meeting(meeting_id):
-    cursor.execute("SELECT * FROM meeting WHERE meeting_id = %s AND user_id = %s", 
-                  (meeting_id, session["user_id"]))
-    meeting = cursor.fetchone()
+    meeting = execute_query(
+        "SELECT * FROM meeting WHERE meeting_id = %s AND user_id = %s",
+        (meeting_id, session["user_id"]), fetch='one'
+    )
     if not meeting:
         flash("❌ You can only edit your own meetings!")
         return redirect(url_for("my_created_meetings"))
-  
-    cursor.execute("""
-        SELECT u.user_id, u.user_name 
-        FROM meeting_participant mp 
-        JOIN user u ON mp.user_id = u.user_id 
+
+    participants = execute_query("""
+        SELECT u.user_id, u.user_name
+        FROM meeting_participant mp
+        JOIN "user" u ON mp.user_id = u.user_id
         WHERE mp.meeting_id = %s
-    """, (meeting_id,))
-    participants = cursor.fetchall()
-  
-    cursor.execute("""
-    SELECT u.user_id, u.user_name, u.email, u.user_mobileNo, d.department_name
-    FROM user u
-    LEFT JOIN department d ON u.department_id = d.department_id
-    WHERE u.role_id != 100""")
-    all_users = cursor.fetchall()
-  
-    cursor.execute("SELECT * FROM department ORDER BY department_name")
-    departments = cursor.fetchall()
-  
+    """, (meeting_id,), fetch='all')
+
+    all_users = execute_query("""
+        SELECT u.user_id, u.user_name, u.email, u.user_mobileno, d.department_name
+        FROM "user" u
+        LEFT JOIN department d ON u.department_id = d.department_id
+        WHERE u.role_id != 100
+    """, fetch='all')
+
+    departments = execute_query("SELECT * FROM department ORDER BY department_name", fetch='all')
+
     def parse_time(time_str):
-        try:
-            return datetime.strptime(time_str, "%H:%M:%S").strftime("%H:%M:%S")
-        except ValueError:
+        for fmt in ("%H:%M:%S", "%I:%M %p", "%H:%M"):
             try:
-                return datetime.strptime(time_str, "%I:%M %p").strftime("%H:%M:%S")
+                return datetime.strptime(str(time_str), fmt).strftime("%H:%M:%S")
             except ValueError:
-                try:
-                    return datetime.strptime(time_str, "%H:%M").strftime("%H:%M:%S")
-                except ValueError:
-                    raise ValueError(f"Time format not recognized: {time_str}")
+                continue
+        raise ValueError(f"Time format not recognized: {time_str}")
 
     if request.method == 'POST':
         new_title = request.form['meeting_title']
@@ -502,167 +469,138 @@ def edit_meeting(meeting_id):
         new_end_time_str = request.form['end_time']
         new_venue = request.form['venue']
         new_dept_id = request.form['department_id']
-        
+
         try:
             new_date = datetime.strptime(new_date_str, "%Y-%m-%d").date()
             new_start_time = parse_time(new_start_time_str)
             new_end_time = parse_time(new_end_time_str)
         except ValueError as e:
             flash(str(e))
-            return render_template('edit_meeting.html', 
+            return render_template('edit_meeting.html',
                                    meeting=meeting, participants=participants,
                                    all_users=all_users, departments=departments)
 
         new_participants = request.form.getlist('participants')
         if not new_participants:
             flash("Please select at least one participant.")
-            return render_template('edit_meeting.html', 
+            return render_template('edit_meeting.html',
                                    meeting=meeting, participants=participants,
                                    all_users=all_users, departments=departments)
-        
+
         participant_ids = [int(pid) for pid in new_participants]
         if str(session["user_id"]) not in new_participants:
             participant_ids.append(session["user_id"])
 
         format_strings = ','.join(['%s'] * len(participant_ids))
         conflict_query = f"""
-    SELECT u.user_id, u.user_name, d_meeting.department_name AS meeting_department_name,
-           m.meeting_title, m.meeting_date, m.start_time, m.end_time
-    FROM meeting m
-    JOIN meeting_participant mp ON m.meeting_id = mp.meeting_id
-    JOIN user u ON mp.user_id = u.user_id
-    LEFT JOIN department d_user ON u.department_id = d_user.department_id
-    LEFT JOIN department d_meeting ON m.department_id = d_meeting.department_id
-    WHERE m.meeting_date = %s
-    AND u.user_id IN ({format_strings})
-    AND %s < m.end_time
-    AND %s > m.start_time
-    AND m.meeting_id != %s
-"""
+            SELECT u.user_id, u.user_name, d_meeting.department_name AS meeting_department_name,
+                   m.meeting_title, m.meeting_date, m.start_time, m.end_time
+            FROM meeting m
+            JOIN meeting_participant mp ON m.meeting_id = mp.meeting_id
+            JOIN "user" u ON mp.user_id = u.user_id
+            LEFT JOIN department d_meeting ON m.department_id = d_meeting.department_id
+            WHERE m.meeting_date = %s
+            AND u.user_id IN ({format_strings})
+            AND %s < m.end_time
+            AND %s > m.start_time
+            AND m.meeting_id != %s
+        """
         conflict_params = [new_date, *participant_ids, new_start_time, new_end_time, meeting_id]
-        cursor.execute(conflict_query, conflict_params)
-        conflicting_members = cursor.fetchall()
+        conflicting_members = execute_query(conflict_query, conflict_params, fetch='all')
 
         if conflicting_members:
-            conflict_messages = []
-            for member in conflicting_members:
-                conflict_messages.append(
-                f"Member: {member['user_name']} (ID: {member['user_id']}), "
-                f"Meeting Dept: {member['meeting_department_name']}, "
-                f"Scheduled on: {member['meeting_date']} "
-                f"from {member['start_time']} to {member['end_time']}\n"
-                )
-            error_message = "Conflicts detected:\n" + "\n".join(conflict_messages)
-            flash(error_message)
-            return render_template('edit_meeting.html', 
+            conflict_messages = [
+                f"Member: {m['user_name']} (ID: {m['user_id']}), "
+                f"Meeting Dept: {m['meeting_department_name']}, "
+                f"Scheduled on: {m['meeting_date']} from {m['start_time']} to {m['end_time']}"
+                for m in conflicting_members
+            ]
+            flash("Conflicts detected:\n" + "\n".join(conflict_messages))
+            return render_template('edit_meeting.html',
                                    meeting=meeting, participants=participants,
                                    all_users=all_users, departments=departments)
 
-        # *** SAVE OLD DETAILS BEFORE UPDATE FOR EMAIL ***
-        old_meeting_info = {
-            'title': meeting['meeting_title'],
-            'date': meeting['meeting_date'],
-            'start_time': meeting['start_time'],
-            'end_time': meeting['end_time'],
-            'venue': meeting['venue']
-        }
-        
-        # Update meeting
-        cursor.execute("""
-            UPDATE meeting SET meeting_title=%s, meeting_date=%s, 
+        execute_query("""
+            UPDATE meeting SET meeting_title=%s, meeting_date=%s,
             start_time=%s, end_time=%s, venue=%s, department_id=%s
             WHERE meeting_id=%s
-        """, (new_title, new_date, new_start_time, new_end_time, new_venue, new_dept_id, meeting_id))
-        
-        # Update participants
-        cursor.execute("DELETE FROM meeting_participant WHERE meeting_id=%s", (meeting_id,))
-        for user_id in new_participants:
-            cursor.execute("INSERT INTO meeting_participant (user_id, meeting_id) VALUES (%s, %s)", 
-                          (user_id, meeting_id))
-        conn.commit()
+        """, (new_title, new_date, new_start_time, new_end_time, new_venue, new_dept_id, meeting_id),
+            commit=True, fetch=None)
 
-        # *** NEW: SEND EDIT EMAIL ***
-        # Get updated meeting details
-        cursor.execute("""
-            SELECT m.meeting_title, m.meeting_date, m.start_time, m.end_time, m.venue, d.department_name 
-            FROM meeting m 
-            JOIN department d ON m.department_id = d.department_id 
+        execute_query("DELETE FROM meeting_participant WHERE meeting_id=%s",
+                      (meeting_id,), commit=True, fetch=None)
+        for uid in new_participants:
+            execute_query("INSERT INTO meeting_participant (user_id, meeting_id) VALUES (%s, %s)",
+                          (uid, meeting_id), commit=True, fetch=None)
+
+        meeting_details = execute_query("""
+            SELECT m.meeting_title, m.meeting_date, m.start_time, m.end_time, m.venue, d.department_name
+            FROM meeting m
+            JOIN department d ON m.department_id = d.department_id
             WHERE m.meeting_id = %s
-        """, (meeting_id,))
-        meeting_details = cursor.fetchone()
+        """, (meeting_id,), fetch='one')
 
-        # Get participant emails
-        cursor.execute("""
-            SELECT DISTINCT u.email 
-            FROM meeting_participant mp 
-            JOIN user u ON mp.user_id = u.user_id 
+        emails_rows = execute_query("""
+            SELECT DISTINCT u.email
+            FROM meeting_participant mp
+            JOIN "user" u ON mp.user_id = u.user_id
             WHERE mp.meeting_id = %s AND u.email IS NOT NULL
-        """, (meeting_id,))
-        emails = [row['email'] for row in cursor.fetchall()]
+        """, (meeting_id,), fetch='all')
+        emails = [row['email'] for row in emails_rows]
 
         if emails and meeting_details:
-            meeting_info = {
+            send_meeting_email(emails, 'updated', {
                 'title': meeting_details['meeting_title'],
                 'date': meeting_details['meeting_date'],
                 'start_time': meeting_details['start_time'],
                 'end_time': meeting_details['end_time'],
                 'venue': meeting_details['venue'],
                 'dept_name': meeting_details['department_name']
-            }
-            send_meeting_email(emails, 'updated', meeting_info)
+            })
 
         flash('✅ Meeting updated successfully!')
         return redirect(url_for('my_created_meetings'))
 
-    return render_template('edit_meeting.html', 
+    return render_template('edit_meeting.html',
                            meeting=meeting, participants=participants,
                            all_users=all_users, departments=departments)
-#----------delete meeting----------------
+
+
 @app.route("/faculty/delete-meeting/<int:meeting_id>")
 @login_required
 def delete_meeting(meeting_id):
-    # Check ownership
-    cursor.execute("""
-        SELECT meeting_title FROM meeting 
+    meeting = execute_query("""
+        SELECT meeting_title FROM meeting
         WHERE meeting_id = %s AND user_id = %s
-    """, (meeting_id, session["user_id"]))
-    meeting = cursor.fetchone()
-  
+    """, (meeting_id, session["user_id"]), fetch='one')
+
     if not meeting:
         flash("❌ You can only delete your own meetings!")
         return redirect(url_for("my_created_meetings"))
 
-    # *** NEW: GET EMAILS AND SEND DELETE NOTIFICATION BEFORE DELETION ***
-    cursor.execute("""
-        SELECT DISTINCT u.email 
-        FROM meeting_participant mp 
-        JOIN user u ON mp.user_id = u.user_id 
+    emails_rows = execute_query("""
+        SELECT DISTINCT u.email
+        FROM meeting_participant mp
+        JOIN "user" u ON mp.user_id = u.user_id
         WHERE mp.meeting_id = %s AND u.email IS NOT NULL
-    """, (meeting_id,))
-    emails = [row['email'] for row in cursor.fetchall()]
+    """, (meeting_id,), fetch='all')
+    emails = [row['email'] for row in emails_rows]
 
     if emails:
-        meeting_info = {
-            'title': meeting['meeting_title'][:50] + '...' if len(meeting['meeting_title']) > 50 else meeting['meeting_title'],
-            'date': 'N/A (cancelled)',
-            'start_time': 'N/A',
-            'end_time': 'N/A',
-            'venue': 'N/A',
-            'dept_name': 'N/A'
-        }
-        send_meeting_email(emails, 'deleted/cancelled', meeting_info)
+        title = meeting['meeting_title']
+        send_meeting_email(emails, 'deleted/cancelled', {
+            'title': title[:50] + '...' if len(title) > 50 else title,
+            'date': 'N/A (cancelled)', 'start_time': 'N/A',
+            'end_time': 'N/A', 'venue': 'N/A', 'dept_name': 'N/A'
+        })
 
-    # Delete participants first (foreign key)
-    cursor.execute("DELETE FROM meeting_participant WHERE meeting_id = %s", (meeting_id,))
-  
-    # Delete meeting
-    cursor.execute("DELETE FROM meeting WHERE meeting_id = %s", (meeting_id,))
-  
-    conn.commit()
-  
+    execute_query("DELETE FROM meeting_participant WHERE meeting_id = %s",
+                  (meeting_id,), commit=True, fetch=None)
+    execute_query("DELETE FROM meeting WHERE meeting_id = %s",
+                  (meeting_id,), commit=True, fetch=None)
+
     flash(f'✅ "{meeting["meeting_title"][:30]}" deleted successfully!')
     return redirect(url_for("my_created_meetings"))
-# ---------------edit department------------
 
 
 @app.route("/admin/edit-department/<int:dept_id>", methods=["GET", "POST"])
@@ -672,27 +610,16 @@ def edit_department(dept_id):
 
     if request.method == "POST":
         department_name = request.form["department_name"]
-
-        cursor.execute(
+        execute_query(
             "UPDATE department SET department_name=%s WHERE department_id=%s",
-            (department_name, dept_id)
+            (department_name, dept_id), commit=True, fetch=None
         )
-        conn.commit()
-
         return redirect(url_for("view_departments"))
 
-    cursor.execute(
-        "SELECT * FROM department WHERE department_id=%s",
-        (dept_id,)
+    department = execute_query(
+        "SELECT * FROM department WHERE department_id=%s", (dept_id,), fetch='one'
     )
-    department = cursor.fetchone()
-
-    return render_template(
-        "admin/edit_department.html",
-        department=department
-    )
-
-# --------------------add user----------------------
+    return render_template("admin/edit_department.html", department=department)
 
 
 @app.route("/admin/add-user", methods=["GET", "POST"])
@@ -705,216 +632,129 @@ def add_user():
         email = request.form["email"]
         user_mobileNo = request.form["mobile_no"]
         password = request.form["password"]
-        role_id = request.form["role_id"]  # ✅ FIXED: was "role", now "role_id"
+        role_id = request.form["role_id"]
         department_id = request.form["department_id"]
-        mobile_no = request.form["mobile_no"] # new for mobile NO
 
-        # ✅ VALIDATE ROLE EXISTS
-        cursor.execute(
-            "SELECT role_id FROM role WHERE role_id = %s", (role_id,))
-        if not cursor.fetchone():
+        role = execute_query("SELECT role_id FROM role WHERE role_id = %s", (role_id,), fetch='one')
+        if not role:
             flash("Invalid role selected!")
             return redirect(url_for("add_user"))
 
         hashed_password = generate_password_hash(password)
 
-        cursor.execute("""
-            INSERT INTO user
-            (user_name, email, user_mobileNo, password_hash, role_id, department_id)
+        execute_query("""
+            INSERT INTO "user"
+            (user_name, email, user_mobileno, password_hash, role_id, department_id)
             VALUES (%s, %s, %s, %s, %s, %s)
-        """, (user_name, email, user_mobileNo, hashed_password, role_id, department_id))
+        """, (user_name, email, user_mobileNo, hashed_password, role_id, department_id),
+            commit=True, fetch=None)
 
-        conn.commit()
         flash(f'✅ User "{user_name}" added successfully!')
-        return redirect(url_for("view_users"))  # ✅ Better redirect
+        return redirect(url_for("view_users"))
 
-    # ✅ FETCH ROLES FROM DATABASE
-    cursor.execute("SELECT role_id, role_name FROM role ORDER BY role_name")
-    roles = cursor.fetchall()
+    roles = execute_query("SELECT role_id, role_name FROM role ORDER BY role_name", fetch='all')
+    departments = execute_query("SELECT * FROM department ORDER BY department_name", fetch='all')
 
-    # Get departments (existing)
-    cursor.execute("SELECT * FROM department ORDER BY department_name")
-    departments = cursor.fetchall()
-
-    return render_template(
-        "admin/add_user.html",
-        departments=departments,
-        roles=roles  # ✅ Pass roles to template
-    )
+    return render_template("admin/add_user.html", departments=departments, roles=roles)
 
 
-# -------------view all meetings----------------
-# -------------view all meetings with search----------------
-
-
-# @app.route("/admin/view-meetings")
-# def view_all_meetings():
-#     if "user_id" not in session or session["role_id"] != 100:
-#         return redirect(url_for("login"))
-
-#     # Get search keyword
-#     keyword = request.args.get("q", "").strip()
-
-#     query = """
-#     SELECT m.meeting_title, m.meeting_date,
-#            m.start_time, m.end_time, m.venue,
-#            m.user_id,  -- ✅ ADDED: user_id
-#            d.department_name, u.user_name
-#     FROM meeting m
-#     JOIN department d ON m.department_id = d.department_id
-#     JOIN user u ON m.user_id = u.user_id
-#     """
-#     params = []
-
-#     if keyword:
-#         query += """
-#         WHERE m.meeting_title LIKE %s
-#            OR d.department_name LIKE %s
-#            OR u.user_name LIKE %s
-#         """
-#         params = ["%" + keyword + "%"] * 3
-
-#     query += " ORDER BY m.meeting_date DESC"
-
-#     cursor.execute(query, params)
-#     meetings = cursor.fetchall()
-
-#     return render_template("admin/view_meetings.html", meetings=meetings, search_query=keyword)
 @app.route("/admin/view-meetings")
 def view_all_meetings():
     if "user_id" not in session or session["role_id"] != 100:
         return redirect(url_for("login"))
 
-    # Get search keyword
     keyword = request.args.get("q", "").strip()
 
     query = """
-   SELECT m.meeting_id,  -- ✅ ADDED for View Members link
-       m.meeting_title, m.meeting_date,
-       m.start_time, m.end_time, m.venue,
-       m.user_id,
-       d.department_name, u.user_name, u.user_mobileNo,
-       COUNT(mp.participant_id) as participant_count  -- ✅ NEW: participant count
-FROM meeting m
-JOIN department d ON m.department_id = d.department_id
-JOIN user u ON m.user_id = u.user_id
-LEFT JOIN meeting_participant mp ON m.meeting_id = mp.meeting_id
+        SELECT m.meeting_id, m.meeting_title, m.meeting_date,
+               m.start_time, m.end_time, m.venue, m.user_id,
+               d.department_name, u.user_name, u.user_mobileno,
+               COUNT(mp.participant_id) as participant_count
+        FROM meeting m
+        JOIN department d ON m.department_id = d.department_id
+        JOIN "user" u ON m.user_id = u.user_id
+        LEFT JOIN meeting_participant mp ON m.meeting_id = mp.meeting_id
     """
     params = []
 
     if keyword:
         query += """
-        WHERE m.meeting_title LIKE %s
-           OR d.department_name LIKE %s
-           OR u.user_name LIKE %s
-        GROUP BY m.meeting_id, m.meeting_title, m.meeting_date, 
-                 m.start_time, m.end_time, m.venue, m.user_id,
-                 d.department_name, u.user_name
+        WHERE m.meeting_title ILIKE %s OR d.department_name ILIKE %s OR u.user_name ILIKE %s
         """
         params = ["%" + keyword + "%"] * 3
-    else:
-        query += """
-        GROUP BY m.meeting_id, m.meeting_title, m.meeting_date, 
-                 m.start_time, m.end_time, m.venue, m.user_id,
-                 d.department_name, u.user_name
-        """
 
-    query += " ORDER BY m.meeting_date DESC"
+    query += """
+        GROUP BY m.meeting_id, m.meeting_title, m.meeting_date, m.start_time,
+                 m.end_time, m.venue, m.user_id, d.department_name, u.user_name, u.user_mobileno
+        ORDER BY m.meeting_date DESC
+    """
 
-    cursor.execute(query, params)
-    meetings = cursor.fetchall()
-
+    meetings = execute_query(query, params if params else None, fetch='all')
     return render_template("admin/view_meetings.html", meetings=meetings, search_query=keyword)
-# -------------------new routes for view meeting members feature---------
 
 
 @app.route("/admin/view-meeting-members/<int:meeting_id>")
 @login_required
 def view_meeting_members(meeting_id):
-    # Get meeting details
-    cursor.execute("""
+    meeting = execute_query("""
         SELECT m.meeting_title, m.meeting_date, m.start_time, m.end_time,
                d.department_name, u.user_name as creator_name, u.user_id as creator_id
         FROM meeting m
         JOIN department d ON m.department_id = d.department_id
-        JOIN user u ON m.user_id = u.user_id
+        JOIN "user" u ON m.user_id = u.user_id
         WHERE m.meeting_id = %s
-    """, (meeting_id,))
-    meeting = cursor.fetchone()
+    """, (meeting_id,), fetch='one')
 
     if not meeting:
         flash("Meeting not found!", "error")
         return redirect(url_for("view_all_meetings"))
 
-    # Updated query to include participant's department
-    cursor.execute("""
-        SELECT DISTINCT mp.participant_id,
-                        mp.user_id,
-                        u.user_name,
-                        u.email,
-                        u.user_mobileNo,
-                        r.role_name,
-                        d.department_name -- Added department name here
+    members = execute_query("""
+        SELECT DISTINCT mp.participant_id, mp.user_id, u.user_name,
+               u.email, u.user_mobileno, r.role_name, d.department_name
         FROM meeting_participant mp
-        JOIN user u ON mp.user_id = u.user_id
+        JOIN "user" u ON mp.user_id = u.user_id
         LEFT JOIN role r ON u.role_id = r.role_id
-        LEFT JOIN department d ON u.department_id = d.department_id -- Join with department
+        LEFT JOIN department d ON u.department_id = d.department_id
         WHERE mp.meeting_id = %s
         ORDER BY u.user_name
-    """, (meeting_id,))
-    members = cursor.fetchall()
+    """, (meeting_id,), fetch='all')
 
     return render_template("/view_meeting_members.html",
-                           meeting=meeting,
-                           members=members,
-                           participant_count=len(members)
-                           )
-# ---------------View my Meeting members------------
+                           meeting=meeting, members=members,
+                           participant_count=len(members))
+
+
 @app.route("/view-my-meeting-members/<int:meeting_id>")
 @login_required
 def view_my_meeting_members(meeting_id):
-    # if "user_id" not in session or session["role_id"] != 100:
-    #     return redirect(url_for("login"))
-
-    # Get meeting details
-    cursor.execute("""
+    meeting = execute_query("""
         SELECT m.meeting_title, m.meeting_date, m.start_time, m.end_time,
                d.department_name, u.user_name as creator_name, u.user_id as creator_id
         FROM meeting m
         JOIN department d ON m.department_id = d.department_id
-        JOIN user u ON m.user_id = u.user_id
+        JOIN "user" u ON m.user_id = u.user_id
         WHERE m.meeting_id = %s
-    """, (meeting_id,))
-    meeting = cursor.fetchone()
+    """, (meeting_id,), fetch='one')
 
     if not meeting:
         flash("Meeting not found!", "error")
         return redirect(url_for("view_all_meetings"))
 
-    # Updated query to include participant's department
-    cursor.execute("""
-        SELECT DISTINCT mp.participant_id,
-                        mp.user_id,
-                        u.user_name,
-                        u.email,
-                        u.user_mobileNo,
-                        r.role_name,
-                        d.department_name -- Added department name here
+    members = execute_query("""
+        SELECT DISTINCT mp.participant_id, mp.user_id, u.user_name,
+               u.email, u.user_mobileno, r.role_name, d.department_name
         FROM meeting_participant mp
-        JOIN user u ON mp.user_id = u.user_id
+        JOIN "user" u ON mp.user_id = u.user_id
         LEFT JOIN role r ON u.role_id = r.role_id
-        LEFT JOIN department d ON u.department_id = d.department_id -- Join with department
+        LEFT JOIN department d ON u.department_id = d.department_id
         WHERE mp.meeting_id = %s
         ORDER BY u.user_name
-    """, (meeting_id,))
-    members = cursor.fetchall()
+    """, (meeting_id,), fetch='all')
 
     return render_template("/view_my_meeting_members.html",
-                           meeting=meeting,
-                           members=members,
-                           participant_count=len(members)
-                           )
-# ---------------- LOGOUT ----------------
+                           meeting=meeting, members=members,
+                           participant_count=len(members))
 
 
 @app.route("/logout")
@@ -922,56 +762,35 @@ def logout():
     session.clear()
     return redirect(url_for("login"))
 
-# -----------------My Schedule----------------
-# -----------------My Schedule with Search----------------
-
 
 @app.route("/faculty/my-schedule")
 def my_schedule():
-    # if "user_id" not in session or session["role_id"] != 100:
-    #     return redirect(url_for("login"))
-
-    # Get search keyword
     keyword = request.args.get("q", "").strip()
 
     query = """
-   SELECT m.meeting_id,  -- ✅ ADDED for View Members link
-       m.meeting_title, m.meeting_date,
-       m.start_time, m.end_time, m.venue,
-       m.user_id,
-       d.department_name, u.user_name, u.user_mobileNo,
-       COUNT(mp.participant_id) as participant_count  -- ✅ NEW: participant count
-FROM meeting m
-JOIN department d ON m.department_id = d.department_id
-JOIN user u ON m.user_id = u.user_id
-LEFT JOIN meeting_participant mp ON m.meeting_id = mp.meeting_id
+        SELECT m.meeting_id, m.meeting_title, m.meeting_date,
+               m.start_time, m.end_time, m.venue, m.user_id,
+               d.department_name, u.user_name, u.user_mobileno,
+               COUNT(mp.participant_id) as participant_count
+        FROM meeting m
+        JOIN department d ON m.department_id = d.department_id
+        JOIN "user" u ON m.user_id = u.user_id
+        LEFT JOIN meeting_participant mp ON m.meeting_id = mp.meeting_id
     """
     params = []
 
     if keyword:
-        query += """
-        WHERE m.meeting_title LIKE %s
-           OR d.department_name LIKE %s
-           OR u.user_name LIKE %s
-        GROUP BY m.meeting_id, m.meeting_title, m.meeting_date, 
-                 m.start_time, m.end_time, m.venue, m.user_id,
-                 d.department_name, u.user_name
-        """
+        query += " WHERE m.meeting_title ILIKE %s OR d.department_name ILIKE %s OR u.user_name ILIKE %s"
         params = ["%" + keyword + "%"] * 3
-    else:
-        query += """
-        GROUP BY m.meeting_id, m.meeting_title, m.meeting_date, 
-                 m.start_time, m.end_time, m.venue, m.user_id,
-                 d.department_name, u.user_name
-        """
 
-    query += " ORDER BY m.meeting_date DESC"
+    query += """
+        GROUP BY m.meeting_id, m.meeting_title, m.meeting_date, m.start_time,
+                 m.end_time, m.venue, m.user_id, d.department_name, u.user_name, u.user_mobileno
+        ORDER BY m.meeting_date DESC
+    """
 
-    cursor.execute(query, params)
-    meetings = cursor.fetchall()
-
+    meetings = execute_query(query, params if params else None, fetch='all')
     return render_template("/my_schedule.html", meetings=meetings, search_query=keyword)
-# ----------------------department-calendar-----------------
 
 
 @app.route('/department_calendar')
@@ -981,225 +800,139 @@ def department_calendar():
 
     user_id = session["user_id"]
 
-    # Get user's department
-    cursor.execute(
-        "SELECT department_id FROM user WHERE user_id = %s",
-        (user_id,)
+    dept = execute_query(
+        'SELECT department_id FROM "user" WHERE user_id = %s', (user_id,), fetch='one'
     )
-    dept = cursor.fetchone()
 
     if not dept or not dept["department_id"]:
         return "Department not assigned", 404
 
     department_id = dept["department_id"]
 
-    # ✅ FIXED: Better SQL query with proper JOINs and date handling
-    cursor.execute("""
+    # PostgreSQL equivalent of CURDATE() is CURRENT_DATE
+    # DATE_FORMAT() -> TO_CHAR() in PostgreSQL
+    meetings = execute_query("""
         SELECT m.meeting_id, m.meeting_title as title, m.meeting_date as date, m.venue,
-               CASE WHEN m.meeting_date < CURDATE() THEN 'past' ELSE 'upcoming' END as status,
-               DATE_FORMAT(m.meeting_date, '%Y-%m-%d') as date_iso
+               CASE WHEN m.meeting_date < CURRENT_DATE THEN 'past' ELSE 'upcoming' END as status,
+               TO_CHAR(m.meeting_date, 'YYYY-MM-DD') as date_iso
         FROM meeting m
         WHERE m.department_id = %s
-    """, (department_id,))
+    """, (department_id,), fetch='all')
 
-    meetings = cursor.fetchall()
-
-    # ✅ FIXED: Simple, clean event formatting
     events = []
     for m in meetings:
         events.append({
             "title": m["title"][:30] if m["title"] else "Untitled",
-            "date": m["date_iso"],  # ✅ Use pre-formatted ISO date from SQL
+            "date": m["date_iso"],
             "venue": m["venue"] or "TBD",
             "status": m["status"]
         })
 
-    print(f"DEBUG: Found {len(events)} events: {events}")  # Debug line
-
-    return render_template(
-        "department_calendar.html",
-        events=events
-    )
-# ---------------USER REGISTRATION BY THEMSELVES (sign up)-------------
+    return render_template("department_calendar.html", events=events)
 
 
-# @app.route('/register', methods=['GET', 'POST'])
-# def register():
-#     if request.method == 'POST':
-#         name = request.form['name']
-#         email = request.form['email']
-#         password = request.form['password']
-#         role_id = request.form['role_id']
-#         department_id = request.form['department_id']
-
-#         # Validate password
-#         if len(password) < 6:
-#             return render_template('register.html',
-#                                    error="Password must be at least 6 characters!",
-#                                    departments=get_departments(),
-#                                    roles=get_roles())  # ✅ Use get_roles()
-
-#         # Check if email exists
-#         cursor.execute("SELECT * FROM user WHERE email = %s", (email,))
-#         if cursor.fetchone():
-#             return render_template('register.html',
-#                                    error="Email already registered!",
-#                                    departments=get_departments(),
-#                                    roles=get_roles())
-
-#         # Check pending request
-#         cursor.execute(
-#             "SELECT * FROM registration_requests WHERE email = %s", (email,))
-#         if cursor.fetchone():
-#             return render_template('register.html',
-#                                    error="Registration request already pending!",
-#                                    departments=get_departments(),
-#                                    roles=get_roles())
-
-#         # Hash password and store
-#         password_hash = generate_password_hash(password)
-#         cursor.execute("""
-#             INSERT INTO registration_requests (name, email, password_hash, role_id, department_id) 
-#             VALUES (%s, %s, %s, %s, %s)
-#         """, (name, email, password_hash, role_id, department_id))
-#         conn.commit()
-
-#         return render_template('register.html', success=True)
-
-#     # ✅ FIXED: Use get_roles() not get_role()
-#     return render_template('register.html',
-#                            departments=get_departments(),
-#                            roles=get_roles())
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
         name = request.form['name']
         email = request.form['email']
-        mobile_no = request.form['mobile_no']  # ✅ NEW: Mobile number
+        mobile_no = request.form['mobile_no']
         password = request.form['password']
         role_id = request.form['role_id']
         department_id = request.form['department_id']
-        
-        # ✅ NEW: Validate mobile number
+
         if not mobile_no.isdigit() or len(mobile_no) != 10:
-            return render_template('register.html', 
-                                error="Mobile number must be exactly 10 digits!", 
-                                departments=get_departments(),
-                                roles=get_roles())
-        
-        # ✅ Check if mobile exists
-        cursor.execute("SELECT * FROM user WHERE user_mobileNo = %s", (mobile_no,))
-        if cursor.fetchone():
-            return render_template('register.html', 
-                                error="Mobile number already registered!", 
-                                departments=get_departments(),
-                                roles=get_roles())
-        
-        # Existing email checks...
+            return render_template('register.html',
+                                   error="Mobile number must be exactly 10 digits!",
+                                   departments=get_departments(), roles=get_roles())
+
+        existing_mobile = execute_query(
+            'SELECT * FROM "user" WHERE user_mobileno = %s', (mobile_no,), fetch='one'
+        )
+        if existing_mobile:
+            return render_template('register.html',
+                                   error="Mobile number already registered!",
+                                   departments=get_departments(), roles=get_roles())
+
         if len(password) < 6:
-            return render_template('register.html', 
-                                error="Password must be at least 6 characters!", 
-                                departments=get_departments(),
-                                roles=get_roles())
-        
-        cursor.execute("SELECT * FROM user WHERE email = %s", (email,))
-        if cursor.fetchone():
-            return render_template('register.html', 
-                                error="Email already registered!", 
-                                departments=get_departments(),
-                                roles=get_roles())
-        
-        cursor.execute("SELECT * FROM registration_requests WHERE email = %s", (email,))
-        if cursor.fetchone():
-            return render_template('register.html', 
-                                error="Registration request already pending!", 
-                                departments=get_departments(),
-                                roles=get_roles())
-        
-        # ✅ SAVE MOBILE NUMBER to registration_requests
+            return render_template('register.html',
+                                   error="Password must be at least 6 characters!",
+                                   departments=get_departments(), roles=get_roles())
+
+        existing_email = execute_query(
+            'SELECT * FROM "user" WHERE email = %s', (email,), fetch='one'
+        )
+        if existing_email:
+            return render_template('register.html',
+                                   error="Email already registered!",
+                                   departments=get_departments(), roles=get_roles())
+
+        existing_request = execute_query(
+            "SELECT * FROM registration_requests WHERE email = %s", (email,), fetch='one'
+        )
+        if existing_request:
+            return render_template('register.html',
+                                   error="Registration request already pending!",
+                                   departments=get_departments(), roles=get_roles())
+
         password_hash = generate_password_hash(password)
-        cursor.execute("""
-            INSERT INTO registration_requests 
-            (name, email, user_mobileNo, password_hash, role_id, department_id) 
+        execute_query("""
+            INSERT INTO registration_requests
+            (name, email, user_mobileno, password_hash, role_id, department_id)
             VALUES (%s, %s, %s, %s, %s, %s)
-        """, (name, email, mobile_no, password_hash, role_id, department_id))  # ✅ Added mobile
-        conn.commit()
-        
+        """, (name, email, mobile_no, password_hash, role_id, department_id),
+            commit=True, fetch=None)
+
         return render_template('register.html', success=True)
-    
-    return render_template('register.html',
-                         departments=get_departments(),
-                         roles=get_roles())
+
+    return render_template('register.html', departments=get_departments(), roles=get_roles())
 
 
 @app.route('/admin/registration_requests')
 @login_required
 def registration_requests():
-    if session.get("role_id") != 100:  # ✅ Use session directly - SAFER
+    if session.get("role_id") != 100:
         return redirect(url_for('admin_dashboard'))
 
-    cursor.execute("""
+    requests_list = execute_query("""
         SELECT r.*, d.department_name, r.role_id,
                (SELECT role_name FROM role WHERE role_id = r.role_id) as role_name
-        FROM registration_requests r 
+        FROM registration_requests r
         LEFT JOIN department d ON r.department_id = d.department_id
         WHERE r.status = 'pending'
         ORDER BY r.created_at DESC
-    """)
-    requests = cursor.fetchall()
+    """, fetch='all')
 
-    return render_template('admin/registration_requests.html', requests=requests)
+    return render_template('admin/registration_requests.html', requests=requests_list)
 
 
-# @app.route('/admin/approve_request/<int:request_id>')
-# @login_required
-# def approve_request(request_id):
-#     if get_role(session['user_id']) != 100:
-#         return redirect(url_for('admin_dashboard'))
-
-#     cursor.execute(
-#         "SELECT * FROM registration_requests WHERE id = %s AND status = 'pending'", (request_id,))
-#     request = cursor.fetchone()
-#     if not request:
-#         flash('Request not found or already processed!')
-#         return redirect(url_for('registration_requests'))
-
-#     # ✅ COPY ALL DATA including user's password_hash to user table
-#     cursor.execute("""
-#         INSERT INTO user (user_name, email, password_hash, department_id, role_id) 
-#         VALUES (%s, %s, %s, %s, %s)
-#     """, (request['name'], request['email'], request['password_hash'], request['department_id'], request['role_id']))
-
-#     # Mark as approved
-#     cursor.execute(
-#         "UPDATE registration_requests SET status = 'approved' WHERE id = %s", (request_id,))
-#     conn.commit()
-
-#     flash(
-#         f'✅ User "{request["name"]}" approved! They can login with their chosen password.')
-#     return redirect(url_for('registration_requests'))
 @app.route('/admin/approve_request/<int:request_id>')
 @login_required
 def approve_request(request_id):
     if get_role(session['user_id']) != 100:
         return redirect(url_for('admin_dashboard'))
 
-    cursor.execute("SELECT * FROM registration_requests WHERE id = %s AND status = 'pending'", (request_id,))
-    request = cursor.fetchone()
-    if not request:
+    reg_request = execute_query(
+        "SELECT * FROM registration_requests WHERE id = %s AND status = 'pending'",
+        (request_id,), fetch='one'
+    )
+    if not reg_request:
         flash('Request not found or already processed!')
         return redirect(url_for('registration_requests'))
 
-    # ✅ COPY MOBILE NUMBER to user table
-    cursor.execute("""
-        INSERT INTO user (user_name, email, user_mobileNo, password_hash, department_id, role_id) 
+    execute_query("""
+        INSERT INTO "user" (user_name, email, user_mobileno, password_hash, department_id, role_id)
         VALUES (%s, %s, %s, %s, %s, 101)
-    """, (request['name'], request['email'], request['user_mobileNo'], request['password_hash'], request['department_id']))
+    """, (reg_request['name'], reg_request['email'], reg_request['user_mobileno'],
+          reg_request['password_hash'], reg_request['department_id']),
+        commit=True, fetch=None)
 
-    cursor.execute("UPDATE registration_requests SET status = 'approved' WHERE id = %s", (request_id,))
-    conn.commit()
+    execute_query(
+        "UPDATE registration_requests SET status = 'approved' WHERE id = %s",
+        (request_id,), commit=True, fetch=None
+    )
 
-    flash(f'✅ User "{request["name"]}" ({request["user_mobileNo"]}) approved!')
+    flash(f'✅ User "{reg_request["name"]}" ({reg_request["user_mobileno"]}) approved!')
     return redirect(url_for('registration_requests'))
 
 
@@ -1209,13 +942,12 @@ def reject_request(request_id):
     if get_role(session['user_id']) != 100:
         return redirect(url_for('admin_dashboard'))
 
-    cursor.execute(
-        "UPDATE registration_requests SET status = 'rejected' WHERE id = %s", (request_id,))
-    conn.commit()
+    execute_query(
+        "UPDATE registration_requests SET status = 'rejected' WHERE id = %s",
+        (request_id,), commit=True, fetch=None
+    )
     flash('❌ Registration request rejected!')
     return redirect(url_for('registration_requests'))
-
-# ----------------------User Profile-------------------------------
 
 
 @app.route('/profile')
@@ -1223,72 +955,53 @@ def profile():
     if "user_id" not in session:
         return redirect('/login')
 
-    user_id = session["user_id"]
-
-    # Fetch user info with department, role, and mobile number
-    cursor.execute("""
-        SELECT u.user_name, u.email, u.user_mobileNo, d.department_name, r.role_name
-        FROM user u
+    user = execute_query("""
+        SELECT u.user_name, u.email, u.user_mobileno, d.department_name, r.role_name
+        FROM "user" u
         LEFT JOIN department d ON u.department_id = d.department_id
         LEFT JOIN role r ON u.role_id = r.role_id
         WHERE u.user_id = %s
-    """, (user_id,))
+    """, (session["user_id"],), fetch='one')
 
-    user = cursor.fetchone()
     if not user:
         return "User not found", 404
 
-    # Prepare user data with mobile number
     user_data = {
         "user_id": session["user_id"],
         "user_name": user["user_name"],
         "email": user["email"],
-        "user_mobileNo": user["user_mobileNo"] or "N/A",
+        "user_mobileNo": user["user_mobileno"] or "N/A",
         "department_name": user["department_name"] or "N/A",
         "role_name": user["role_name"] or "N/A"
     }
-
     return render_template("user_profile.html", user=user_data)
-#------------------Admin Profile------------
+
 
 @app.route('/admin_profile')
 def admin_profile():
     if "user_id" not in session:
         return redirect('/login')
 
-    user_id = session["user_id"]
-
-    # Fetch user info with department, role, and mobile number
-    cursor.execute("""
-        SELECT u.user_name, u.email, u.user_mobileNo, d.department_name, r.role_name
-        FROM user u
+    user = execute_query("""
+        SELECT u.user_name, u.email, u.user_mobileno, d.department_name, r.role_name
+        FROM "user" u
         LEFT JOIN department d ON u.department_id = d.department_id
         LEFT JOIN role r ON u.role_id = r.role_id
         WHERE u.user_id = %s
-    """, (user_id,))
+    """, (session["user_id"],), fetch='one')
 
-    user = cursor.fetchone()
     if not user:
         return "User not found", 404
 
-    # Prepare user data with mobile number
     user_data = {
         "user_id": session["user_id"],
         "user_name": user["user_name"],
         "email": user["email"],
-        "user_mobileNo": user["user_mobileNo"] or "N/A",
+        "user_mobileNo": user["user_mobileno"] or "N/A",
         "department_name": user["department_name"] or "N/A",
         "role_name": user["role_name"] or "N/A"
     }
-
     return render_template("admin_profile.html", user=user_data)
-
-    
-#---------Edit admin Profile-------------
-# @app.route('/edit_admin_profile')
-# def edit_user_profile():
-#     return render_template('edit_admin_profile.html')
-# --------------------------Change Password-------------
 
 
 @app.route('/change_password', methods=['GET', 'POST'])
@@ -1302,292 +1015,122 @@ def change_password():
         old_password = request.form['old_password']
         new_password = request.form['new_password']
 
-        # Fetch hashed password from DB - ✅ Fixed: lowercase 'user'
-        cursor.execute(
-            "SELECT password_hash FROM user WHERE user_id=%s", (session["user_id"],))
-        stored_password_row = cursor.fetchone()
+        stored = execute_query(
+            'SELECT password_hash FROM "user" WHERE user_id=%s',
+            (session["user_id"],), fetch='one'
+        )
 
-        if not stored_password_row:
+        if not stored:
             message = "User not found!"
             return render_template("change_password.html", message=message)
 
-        # Access by key because cursor is dictionary=True
-        stored_password = stored_password_row['password_hash']
-
-        if check_password_hash(stored_password, old_password):
+        if check_password_hash(stored['password_hash'], old_password):
             new_hashed = generate_password_hash(new_password)
-            cursor.execute(
-                "UPDATE user SET password_hash=%s WHERE user_id=%s",
-                (new_hashed, session["user_id"])
+            execute_query(
+                'UPDATE "user" SET password_hash=%s WHERE user_id=%s',
+                (new_hashed, session["user_id"]), commit=True, fetch=None
             )
-            conn.commit()
             message = "Password updated successfully!"
         else:
             message = "Old password is incorrect!"
 
     return render_template("change_password.html", message=message)
 
-#--------------------Edit Admin Profile----------
+
 @app.route('/admin/profile/edit', methods=['GET', 'POST'])
 @login_required
 def edit_admin_profile():
     user_id = session['user_id']
-    
-    # Get current user data
-    cursor.execute("""
-        SELECT u.user_name, u.email, u.user_mobileNo, u.department_id, u.role_id,
+
+    current_user = execute_query("""
+        SELECT u.user_name, u.email, u.user_mobileno, u.department_id, u.role_id,
                d.department_name, r.role_name
-        FROM user u
+        FROM "user" u
         LEFT JOIN department d ON u.department_id = d.department_id
         LEFT JOIN role r ON u.role_id = r.role_id
         WHERE u.user_id = %s
-    """, (user_id,))
-    current_user = cursor.fetchone()
-    
+    """, (user_id,), fetch='one')
+
     if request.method == 'POST':
         new_name = request.form['name']
         new_email = request.form['email']
         new_mobile = request.form['mobile_no']
-        
-        # ✅ UPDATE DATABASE
-        cursor.execute("""
-            UPDATE user 
-            SET user_name = %s, email = %s, user_mobileNo = %s
+
+        execute_query("""
+            UPDATE "user" SET user_name = %s, email = %s, user_mobileno = %s
             WHERE user_id = %s
-        """, (new_name, new_email, new_mobile, user_id))
-        
-        # 🔥 CRITICAL: COMMIT THE CHANGES!
-        conn.commit()  # ← THIS WAS MISSING!
-        
-        # Update session
+        """, (new_name, new_email, new_mobile, user_id), commit=True, fetch=None)
+
         session['user_name'] = new_name
         session['email'] = new_email
-        
+
         flash('✅ Profile updated successfully!')
         return redirect(url_for('profile'))
-    
-    # Get dropdown options
-    cursor.execute("SELECT * FROM department ORDER BY department_name")
-    departments = cursor.fetchall()
-    
-    cursor.execute("SELECT * FROM role ORDER BY role_name")
-    roles = cursor.fetchall()
-    
-    return render_template('edit_admin_profile.html', 
-                         user=current_user, 
-                         departments=departments, 
-                         roles=roles)
-#----------------EDIT USER PROFILE ROUTE---------------------
+
+    departments = execute_query("SELECT * FROM department ORDER BY department_name", fetch='all')
+    roles = execute_query("SELECT * FROM role ORDER BY role_name", fetch='all')
+
+    return render_template('edit_admin_profile.html',
+                           user=current_user, departments=departments, roles=roles)
+
+
 @app.route('/profile/edit', methods=['GET', 'POST'])
 @login_required
 def edit_profile():
     user_id = session['user_id']
-    
-    # Get current user data
-    cursor.execute("""
-        SELECT u.user_name, u.email, u.user_mobileNo, u.department_id, u.role_id,
+
+    current_user = execute_query("""
+        SELECT u.user_name, u.email, u.user_mobileno, u.department_id, u.role_id,
                d.department_name, r.role_name
-        FROM user u
+        FROM "user" u
         LEFT JOIN department d ON u.department_id = d.department_id
         LEFT JOIN role r ON u.role_id = r.role_id
         WHERE u.user_id = %s
-    """, (user_id,))
-    current_user = cursor.fetchone()
-    
+    """, (user_id,), fetch='one')
+
     if request.method == 'POST':
         new_name = request.form['name']
         new_email = request.form['email']
         new_mobile = request.form['mobile_no']
-        
-        # ✅ UPDATE DATABASE
-        cursor.execute("""
-            UPDATE user 
-            SET user_name = %s, email = %s, user_mobileNo = %s
+
+        execute_query("""
+            UPDATE "user" SET user_name = %s, email = %s, user_mobileno = %s
             WHERE user_id = %s
-        """, (new_name, new_email, new_mobile, user_id))
-        
-        # 🔥 CRITICAL: COMMIT THE CHANGES!
-        conn.commit()  # ← THIS WAS MISSING!
-        
-        # Update session
+        """, (new_name, new_email, new_mobile, user_id), commit=True, fetch=None)
+
         session['user_name'] = new_name
         session['email'] = new_email
-        
+
         flash('✅ Profile updated successfully!')
         return redirect(url_for('profile'))
-    
-    # Get dropdown options
-    cursor.execute("SELECT * FROM department ORDER BY department_name")
-    departments = cursor.fetchall()
-    
-    cursor.execute("SELECT * FROM role ORDER BY role_name")
-    roles = cursor.fetchall()
-    
-    return render_template('edit_profile.html', 
-                         user=current_user, 
-                         departments=departments, 
-                         roles=roles)
-# ---------------- CREATE SCHEDULE ----------------
+
+    departments = execute_query("SELECT * FROM department ORDER BY department_name", fetch='all')
+    roles = execute_query("SELECT * FROM role ORDER BY role_name", fetch='all')
+
+    return render_template('edit_profile.html',
+                           user=current_user, departments=departments, roles=roles)
 
 
-# @app.route("/faculty/create-schedule", methods=["GET", "POST"])
-# def create_schedule():
-#     # if "user_id" not in session or session["role_id"] != 101:
-#     #     return redirect(url_for("login"))
-
-#     error = ""
-#     success = ""
-#     conflict_details = None
-
-#     # 🔹 Fetch ALL departments for dropdown
-#     cursor.execute("SELECT department_id, department_name FROM department")
-#     departments = cursor.fetchall()
-
-#     # 🔹 Fetch all members except admin
-#     cursor.execute(
-#     """
-#     SELECT u.user_id, u.user_name, u.email, u.user_mobileNo, d.department_name
-#     FROM user u
-#     LEFT JOIN department d ON u.department_id = d.department_id
-#     WHERE u.role_id != 100
-#     """
-# )
-#     members = cursor.fetchall()
-
-#     if request.method == "POST":
-#         title = request.form["meeting_title"]
-#         date = request.form["meeting_date"]
-#         start_time = request.form["start_time"]
-#         end_time = request.form["end_time"]
-#         venue = request.form["venue"]
-#         department_id = request.form["department_id"]   # ✅ NEW
-#         participants = request.form.getlist("participants")
-
-#         if not participants:
-#             error = "Please select at least one participant."
-#             return render_template(
-#                 "create_schedule.html",
-#                 members=members,
-#                 departments=departments,
-#                 error=error
-#             )
-
-#         # ---------------- CONFLICT CHECK ----------------
-#         conflict_details = []
-
-#         conflict_query = """
-#         SELECT m.meeting_id, m.meeting_date, m.start_time, m.end_time
-#         FROM meeting m
-#         JOIN meeting_participant mp ON m.meeting_id = mp.meeting_id
-#         WHERE mp.user_id = %s
-#         AND m.meeting_date = %s
-#         AND %s < m.end_time
-#         AND %s > m.start_time
-#         """
-
-#         for user_id in participants:
-#             cursor.execute(
-#                 conflict_query, (user_id, date, start_time, end_time))
-#             conflict = cursor.fetchone()
-
-#             if conflict:
-#                 cursor.execute(
-#                     "SELECT user_name FROM user WHERE user_id = %s",
-#                     (user_id,)
-#                 )
-#                 user_name = cursor.fetchone()["user_name"]
-
-#                 cursor.execute(
-#                     """
-#                     SELECT department_name FROM department
-#                     WHERE department_id = %s
-#                     """,
-#                     (department_id,)
-#                 )
-#                 department_name = cursor.fetchone()["department_name"]
-
-#                 conflict_details.append({
-#                     "user_id": user_id,
-#                     "user_name": user_name,
-#                     "department": department_name,
-#                     "date": conflict["meeting_date"],
-#                     "start_time": conflict["start_time"],
-#                     "end_time": conflict["end_time"]
-#                 })
-
-#         if conflict_details:
-#             error = "One or more selected members already have a conflicting meeting."
-#             return render_template(
-#                 "create_schedule.html",
-#                 members=members,
-#                 departments=departments,
-#                 error=error,
-#                 conflict_details=conflict_details
-#             )
-
-#         # ---------------- INSERT MEETING ----------------
-#         insert_meeting = """
-#         INSERT INTO meeting
-#         (meeting_title, meeting_date, start_time, end_time,
-#          user_id, department_id, venue)
-#         VALUES (%s, %s, %s, %s, %s, %s, %s)
-#         """
-#         cursor.execute(insert_meeting, (
-#             title, date, start_time, end_time,
-#             session["user_id"], department_id, venue
-#         ))
-#         conn.commit()
-
-#         meeting_id = cursor.lastrowid
-
-#         # ---------------- INSERT PARTICIPANTS ----------------
-#         insert_participant = """
-#         INSERT INTO meeting_participant (user_id, meeting_id)
-#         VALUES (%s, %s)
-#         """
-#         for user_id in participants:
-#             cursor.execute(insert_participant, (user_id, meeting_id))
-#         conn.commit()
-
-#         success = "✅ Meeting scheduled successfully."
-
-#     return render_template(
-#         "create_schedule.html",
-#         members=members,
-#         departments=departments,
-#         success=success,
-#         error=error,
-#         conflict_details=conflict_details
-#     )
 @app.route("/faculty/create-schedule", methods=["GET", "POST"])
 def create_schedule():
     error = ""
     success = ""
-    conflict_details = []
 
-    # Fetch all departments for dropdown
-    cursor.execute("SELECT department_id, department_name FROM department")
-    departments = cursor.fetchall()
-
-    # Fetch all members except admin
-    cursor.execute(
-        """
-        SELECT u.user_id, u.user_name, u.email, u.user_mobileNo, d.department_name
-        FROM user u
+    departments = execute_query("SELECT department_id, department_name FROM department", fetch='all')
+    all_users = execute_query("""
+        SELECT u.user_id, u.user_name, u.email, u.user_mobileno, d.department_name
+        FROM "user" u
         LEFT JOIN department d ON u.department_id = d.department_id
         WHERE u.role_id != 100
-        """
-    )
-    members = cursor.fetchall()
+    """, fetch='all')
 
     def parse_time(time_str):
-        try:
-            return datetime.strptime(time_str, "%I:%M %p").strftime("%H:%M:%S")
-        except ValueError:
+        for fmt in ("%I:%M %p", "%H:%M"):
             try:
-                return datetime.strptime(time_str, "%H:%M").strftime("%H:%M:%S")
+                return datetime.strptime(time_str, fmt).strftime("%H:%M:%S")
             except ValueError:
-                raise ValueError(f"Time format not recognized: {time_str}")
+                continue
+        raise ValueError(f"Time format not recognized: {time_str}")
 
     if request.method == "POST":
         title = request.form["meeting_title"]
@@ -1599,135 +1142,115 @@ def create_schedule():
         participants = request.form.getlist("participants")
 
         try:
-            date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            meeting_date = datetime.strptime(date_str, "%Y-%m-%d").date()
             start_time_24 = parse_time(start_time_str)
             end_time_24 = parse_time(end_time_str)
         except ValueError as e:
             error = str(e)
-            return render_template(
-                "create_schedule.html",
-                members=members,
-                departments=departments,
-                error=error
-            )
+            return render_template("create_schedule.html",
+                                   members=all_users, departments=departments, error=error)
 
         if not participants:
             error = "Please select at least one participant."
-            return render_template(
-                "create_schedule.html",
-                members=members,
-                departments=departments,
-                error=error
-            )
+            return render_template("create_schedule.html",
+                                   members=all_users, departments=departments, error=error)
 
         creator_id_str = str(session["user_id"])
         if creator_id_str not in participants:
             participants.append(creator_id_str)
 
         participant_ids = [int(pid) for pid in participants]
-
         format_strings = ','.join(['%s'] * len(participant_ids))
+
         conflict_query = f"""
-        SELECT u.user_id, u.user_name, d_meeting.department_name AS meeting_department_name, m.meeting_title, m.meeting_date, m.start_time, m.end_time
-        FROM meeting m
-        JOIN meeting_participant mp ON m.meeting_id = mp.meeting_id
-        JOIN user u ON mp.user_id = u.user_id
-        LEFT JOIN department d_meeting ON m.department_id = d_meeting.department_id
-        WHERE m.meeting_date = %s
-        AND u.user_id IN ({format_strings})
-        AND %s < m.end_time
-        AND %s > m.start_time
+            SELECT u.user_id, u.user_name, d_meeting.department_name AS meeting_department_name,
+                   m.meeting_title, m.meeting_date, m.start_time, m.end_time
+            FROM meeting m
+            JOIN meeting_participant mp ON m.meeting_id = mp.meeting_id
+            JOIN "user" u ON mp.user_id = u.user_id
+            LEFT JOIN department d_meeting ON m.department_id = d_meeting.department_id
+            WHERE m.meeting_date = %s
+            AND u.user_id IN ({format_strings})
+            AND %s < m.end_time
+            AND %s > m.start_time
         """
-        conflict_params = [date, *participant_ids, start_time_24, end_time_24]
-        cursor.execute(conflict_query, conflict_params)
-        conflicting_members = cursor.fetchall()
+        conflict_params = [meeting_date, *participant_ids, start_time_24, end_time_24]
+        conflicting_members = execute_query(conflict_query, conflict_params, fetch='all')
 
         if conflicting_members:
-            conflict_messages = []
-            for member in conflicting_members:
-                conflict_messages.append(
-                f"Member: {member['user_name']} (ID: {member['user_id']}), "
-                f"Meeting Dept: {member['meeting_department_name']}, "
-                f"Scheduled on: {member['meeting_date']} "
-                f"from {member['start_time']} to {member['end_time']}\n"
-                )
-            error_message = "Conflicts detected:\n" + "\n".join(conflict_messages)
-            return render_template(
-                "create_schedule.html",
-                members=members,
-                departments=departments,
-                error=error_message
-            )
+            msgs = [
+                f"Member: {m['user_name']} (ID: {m['user_id']}), "
+                f"Meeting Dept: {m['meeting_department_name']}, "
+                f"Scheduled on: {m['meeting_date']} from {m['start_time']} to {m['end_time']}"
+                for m in conflicting_members
+            ]
+            return render_template("create_schedule.html",
+                                   members=all_users, departments=departments,
+                                   error="Conflicts detected:\n" + "\n".join(msgs))
 
-        # Insert the new meeting
-        insert_meeting = """
-        INSERT INTO meeting
-        (meeting_title, meeting_date, start_time, end_time, user_id, department_id, venue)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """
-        cursor.execute(insert_meeting, (
-            title, date, start_time_24, end_time_24,
-            session["user_id"], department_id, venue
-        ))
-        conn.commit()
+        # Insert meeting - need RETURNING id for PostgreSQL
+        conn = get_db()
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                INSERT INTO meeting
+                (meeting_title, meeting_date, start_time, end_time, user_id, department_id, venue)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                RETURNING meeting_id
+            """, (title, meeting_date, start_time_24, end_time_24,
+                  session["user_id"], department_id, venue))
+            meeting_id = cur.fetchone()['meeting_id']
 
-        meeting_id = cursor.lastrowid
+            for uid in participant_ids:
+                cur.execute("INSERT INTO meeting_participant (user_id, meeting_id) VALUES (%s, %s)",
+                            (uid, meeting_id))
+            conn.commit()
+        finally:
+            conn.close()
 
-        # Insert participants
-        insert_participant = "INSERT INTO meeting_participant (user_id, meeting_id) VALUES (%s, %s)"
-        for user_id in participant_ids:
-            cursor.execute(insert_participant, (user_id, meeting_id))
-        conn.commit()
-
-        # *** NEW: SEND CREATE EMAIL ***
-        # Get meeting details
-        cursor.execute("""
-            SELECT m.meeting_title, m.meeting_date, m.start_time, m.end_time, m.venue, d.department_name 
-            FROM meeting m 
-            JOIN department d ON m.department_id = d.department_id 
+        # Send email
+        meeting_details = execute_query("""
+            SELECT m.meeting_title, m.meeting_date, m.start_time, m.end_time, m.venue, d.department_name
+            FROM meeting m
+            JOIN department d ON m.department_id = d.department_id
             WHERE m.meeting_id = %s
-        """, (meeting_id,))
-        meeting_details = cursor.fetchone()
+        """, (meeting_id,), fetch='one')
 
-        # Get participant emails (including creator)
-        cursor.execute("""
-            SELECT DISTINCT u.email 
-            FROM meeting_participant mp 
-            JOIN user u ON mp.user_id = u.user_id 
+        emails_rows = execute_query("""
+            SELECT DISTINCT u.email
+            FROM meeting_participant mp
+            JOIN "user" u ON mp.user_id = u.user_id
             WHERE mp.meeting_id = %s AND u.email IS NOT NULL
-        """, (meeting_id,))
-        emails = [row['email'] for row in cursor.fetchall()]
+        """, (meeting_id,), fetch='all')
+        emails = [row['email'] for row in emails_rows]
 
         if emails and meeting_details:
-            meeting_info = {
+            send_meeting_email(emails, 'created', {
                 'title': meeting_details['meeting_title'],
                 'date': meeting_details['meeting_date'],
                 'start_time': meeting_details['start_time'],
                 'end_time': meeting_details['end_time'],
                 'venue': meeting_details['venue'],
                 'dept_name': meeting_details['department_name']
-            }
-            send_meeting_email(emails, 'created', meeting_info)
+            })
 
         success = "✅ Meeting scheduled successfully."
 
-    return render_template(
-        "create_schedule.html",
-        members=members,
-        departments=departments,
-        success=success,
-        error=error
-    )
+    return render_template("create_schedule.html",
+                           members=all_users, departments=departments,
+                           success=success, error=error)
+
+
 # ---------------- RUN APP ----------------
 if __name__ == "__main__":
-     # Start the scheduler
     from apscheduler.schedulers.background import BackgroundScheduler
-    from datetime import datetime
 
     def delete_past_meetings():
         try:
-            cursor.execute("DELETE FROM meeting WHERE meeting_date < CURDATE()")
-            conn.commit()
+            execute_query(
+                "DELETE FROM meeting WHERE meeting_date < CURRENT_DATE",
+                commit=True, fetch=None
+            )
             print(f"[{datetime.now()}] Old meetings deleted.")
         except Exception as e:
             print(f"Error deleting old meetings: {e}")
@@ -1736,16 +1259,3 @@ if __name__ == "__main__":
     scheduler.add_job(delete_past_meetings, 'cron', hour=0, minute=0)
     scheduler.start()
     app.run(debug=True)
-# #delete old meetings locally
-# def delete_past_meetings():
-#     try:
-#         cursor.execute("DELETE FROM meeting WHERE meeting_date < CURDATE()")
-#         conn.commit()
-#         print(f"[{datetime.now()}] Old meetings deleted.")
-#     except Exception as e:
-#         print(f"Error deleting old meetings: {e}")
-
-# if __name__ == "__main__":
-#     # Test the delete function immediately
-#     delete_past_meetings()
-#     app.run(debug=True)
